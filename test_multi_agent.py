@@ -4,7 +4,7 @@ from src.models import LiteLLMModel
 from src.monitoring import LogLevel
 from src.default_tools import DuckDuckGoSearchTool, VisitWebpageTool
 
-openai_api_key = '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'
+openai_api_key = 
 
 # Then we run the agentic part!
 model = LiteLLMModel(model_id="gpt-4o-mini", api_key=openai_api_key) # Could use 'gpt-4o'
