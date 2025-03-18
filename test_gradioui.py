@@ -5,7 +5,7 @@ from src import (
     GradioUI
 )
 
-openai_api_key = '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'
+openai_api_key = 
 # Import tool from Hub
 image_generation_tool = load_tool(repo_id="m-ric/text-to-image", trust_remote_code=True)
 
