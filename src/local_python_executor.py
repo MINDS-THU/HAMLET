@@ -1363,6 +1363,7 @@ def evaluate_python_code(
     static_tools: Optional[Dict[str, Callable]] = None,
     custom_tools: Optional[Dict[str, Callable]] = None,
     state: Optional[Dict[str, Any]] = None,
+    terminal_tools: Optional[List[str]] = None,
     authorized_imports: List[str] = BASE_BUILTIN_MODULES,
     max_print_outputs_length: int = DEFAULT_MAX_LEN_OUTPUT,
 ):
@@ -1385,6 +1386,8 @@ def evaluate_python_code(
             A dictionary mapping variable names to values. The `state` should contain the initial inputs but will be
             updated by this function to contain all variables as they are evaluated.
             The print outputs will be stored in the state under the key "_print_outputs".
+        terminal_tools (`list[str]`, *optional*): 
+            A list of tool names. Whenever any of them is called, the reasoning loop will terminate.
     """
     try:
         expression = ast.parse(code)
@@ -1404,36 +1407,90 @@ def evaluate_python_code(
     state["_print_outputs"] = PrintContainer()
     state["_operations_count"] = {"counter": 0}
 
-    if "final_answer" in static_tools:
-        previous_final_answer = static_tools["final_answer"]
+    if terminal_tools is None:
+        # original behavior of smola agent
+        if "final_answer" in static_tools:
+            previous_final_answer = static_tools["final_answer"]
 
-        def final_answer(answer):  # Using 'answer' as the argument like in the original function
-            raise FinalAnswerException(previous_final_answer(answer))
+            def final_answer(answer):  # Using 'answer' as the argument like in the original function
+                raise FinalAnswerException(previous_final_answer(answer))
 
-        static_tools["final_answer"] = final_answer
+            static_tools["final_answer"] = final_answer
 
-    try:
-        for node in expression.body:
-            result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = False
-        return result, is_final_answer
-    except FinalAnswerException as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = True
-        return e.value, is_final_answer
-    except Exception as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        raise InterpreterError(
-            f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
-        )
+        try:
+            for node in expression.body:
+                result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = False
+            return result, is_final_answer
+        except FinalAnswerException as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = True
+            return e.value, is_final_answer
+        except Exception as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            raise InterpreterError(
+                f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            )
+    # ----------------------------------------------------------
+    # 2. Otherwise, we treat *all* tools in terminal_tools as final-answer tools
+    # ----------------------------------------------------------
+    else:
+        def wrap_terminal_tool(tool_callable: Callable) -> Callable:
+            """
+            Returns a wrapper that calls the original tool,
+            then raises FinalAnswerException to terminate the loop.
+            """
+            def wrapper(*args, **kwargs):
+                raise FinalAnswerException(tool_callable(*args, **kwargs))
+            return wrapper
 
+        # For each name in terminal_tools, replace the callable in static_tools / custom_tools
+        for tool_name in terminal_tools:
+            if tool_name in static_tools:
+                original_tool = static_tools[tool_name]
+                static_tools[tool_name] = wrap_terminal_tool(original_tool)
+            elif tool_name in custom_tools:
+                original_tool = custom_tools[tool_name]
+                custom_tools[tool_name] = wrap_terminal_tool(original_tool)
+            # If tool_name isn’t in either dict, that’s fine — we do nothing.
+
+        if "final_answer" in static_tools:
+            previous_final_answer = static_tools["final_answer"]
+
+            def final_answer(answer):  # Using 'answer' as the argument like in the original function
+                raise FinalAnswerException(previous_final_answer(answer))
+
+            static_tools["final_answer"] = final_answer
+
+        try:
+            # Evaluate each node in the AST
+            result = None
+            for node in expression.body:
+                result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            return result, False
+        except FinalAnswerException as e:
+            # If any terminal tool was called
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            return e.value, True
+        except Exception as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            raise InterpreterError(
+                f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            )
 
 class PythonExecutor:
     pass
@@ -1455,7 +1512,7 @@ class LocalPythonExecutor(PythonExecutor):
         # TODO: assert self.authorized imports are all installed locally
         self.static_tools = None
 
-    def __call__(self, code_action: str) -> Tuple[Any, str, bool]:
+    def __call__(self, code_action: str, terminal_tools: Optional[List[str]] = None) -> Tuple[Any, str, bool]:
         output, is_final_answer = evaluate_python_code(
             code_action,
             static_tools=self.static_tools,
@@ -1463,6 +1520,7 @@ class LocalPythonExecutor(PythonExecutor):
             state=self.state,
             authorized_imports=self.authorized_imports,
             max_print_outputs_length=self.max_print_outputs_length,
+            terminal_tools=terminal_tools,
         )
         logs = str(self.state["_print_outputs"])
         return output, logs, is_final_answer
