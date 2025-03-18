@@ -304,7 +304,7 @@ def process_outcome(listing, buyer_bottomline_price, seller_bottomline_price, ev
 
 if __name__ == "__main__":
     # setup llm backend
-    openai_api_key = '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'
+    openai_api_key = 
     buyer_model = LiteLLMModel(model_id="gpt-4o-mini", api_key=openai_api_key) # Could use 'gpt-4o'
     seller_model = LiteLLMModel(model_id="gpt-4o-mini", api_key=openai_api_key) # Could use 'gpt-4o'
     
