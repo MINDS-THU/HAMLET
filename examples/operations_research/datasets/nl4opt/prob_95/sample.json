@@ -1,0 +1,11 @@
+[
+    {
+        "input": {
+            "heap_leaching": 3,
+            "vat_leaching": 5
+        },
+        "output": [
+            30.0
+        ]
+    }
+]

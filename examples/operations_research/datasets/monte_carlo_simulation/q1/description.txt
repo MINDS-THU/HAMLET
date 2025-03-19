@@ -1,0 +1,15 @@
+Consider a stock currently priced at $100 per share. Its mean annual return is 15% and the standard deviation of its annual return is 30%. What is the value of an Asian Option that expires in 52 weeks (one year) with an exercise price of $110. Assume that the risk-free rate is 9%.
+
+Notes:
+
+An Asian Option is a variation of a basic call option whose payoff depends on the average price of the stock over the lifetime of the option rather than price of the stock at expiration of the option. That is, if the exercise price of the option is Pe and the average price of the stock over the lifetime of the option is Pavg, then the payoff at the expiration date of the option is the larger of Pavg - Pe and 0. To price an Asian option, find the expected value of the payoff from the option, assuming the stock grows at the risk-free rate.
+
+Many financial models of stock prices assume that a stock's price follows a lognormal distribution; i.e., that the logarithm of a stock at any time is a normally distributed random variable. More specifically, it is assumed that
+
+Pt = P0 * exp[(MEAN-0.5*STDEV^2)*t + STDEV*Z*t^0.5)]
+
+where Pt is the stock price at time t, P0 is the stock price at time 0, Z denotes the standard normal random variable, MEAN is the mean percentage growth rate of the stock and STDEV is the standard deviation of this growth rate. Note that the logarithm of Pt is indeed normally distributed, and therefore Pt itself is lognormally distributed.
+
+You may assume that the average price of the stock is obtained by averaging the closing prices of the stock at the end of each week.
+
+Objective: the current price of an Asian Option on the stock in question.

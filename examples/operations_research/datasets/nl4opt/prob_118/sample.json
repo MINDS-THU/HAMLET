@@ -1,0 +1,17 @@
+[
+    {
+        "input": {
+            "vitamin_shots": 10,
+            "pills": 7,
+            "var1": 30,
+            "var2": 40,
+            "var3": 50,
+            "var4": 30,
+            "var5": 10,
+            "var6": 7
+        },
+        "output": [
+            226.0
+        ]
+    }
+]

@@ -305,16 +305,16 @@ def process_outcome(listing, buyer_bottomline_price, seller_bottomline_price, ev
 if __name__ == "__main__":
     # setup llm backend
     openai_api_key = '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'
-    buyer_model = LiteLLMModel(model_id="gpt-4o-mini", api_key=openai_api_key) # Could use 'gpt-4o'
-    seller_model = LiteLLMModel(model_id="gpt-4o-mini", api_key=openai_api_key) # Could use 'gpt-4o'
+    buyer_model = LiteLLMModel(model_id="gpt-4o", api_key=openai_api_key) # Could use 'gpt-4o'
+    seller_model = LiteLLMModel(model_id="gpt-4o", api_key=openai_api_key) # Could use 'gpt-4o'
     
     # load amazon dataset
-    num_listings = 500
+    num_listings = 10
     with open("./examples/bargaining/datasets/amazon/processed_data.json", "r") as file:
         processed_data = json.load(file)
     selected_listings = sample_unique_items(processed_data, num_listings)
-    buyer_fraction_range = [0.6, 1.0]
-    seller_fraction_range = [0.1, 0.4]
+    buyer_fraction_range = [0.4, 0.6]
+    seller_fraction_range = [0.4, 0.6]
     
     outcome_list = []
 
@@ -343,8 +343,8 @@ if __name__ == "__main__":
         print("==== Scenario {} ====".format(i))
         pprint(listing)
 
-        buyer = BargainingAgent(role='buyer', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=buyer_model, add_base_tools=True, verbosity_level=LogLevel.INFO)
-        seller = BargainingAgent(role='seller', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=seller_model, add_base_tools=True, verbosity_level=LogLevel.INFO)
+        buyer = BargainingAgent(role='buyer', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=buyer_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG)
+        seller = BargainingAgent(role='seller', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=seller_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG)
 
         deal, latest_offer, event_list = start_negotiating({"buyer":buyer, "seller":seller})
         if deal:

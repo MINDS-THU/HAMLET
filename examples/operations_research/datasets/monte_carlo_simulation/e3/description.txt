@@ -1,0 +1,13 @@
+The Wozac Company is a drug manufacturer. Wozac has recently accepted an order from its best customer for 8000 ounces of a new miracle drug, and Wozac wants to plan its production schedule to meet the customer's promised delivery date of December 1. There are three sources of uncertainty that make planning difficult. First, the drug must be produced in batches, and there is uncertainty in the time required to produce a batch, which could be anywhere from 5 to 11 days. This uncertainty is described by the discrete distribution in Table 11.1. Second, the yield (usable quantity) from any batch is uncertain. Based on historical data, Wozac believes the yield can be modeled by a triangular distribution with minimum, most likely, and maximum values equal to 600, 1000, and 1100 ounces, respectively. Third, all batches must go through a rigorous inspection once they are completed. The probability that a typical batch passes inspection is only 0.8. With probability 0.2, the batch fails inspection, and none of it can be used to help fill the order. Wozac wants to use simulation to help decide how many days prior to the due date it should begin production.
+
+Table 11.1
+Days    Probability
+5       0.05
+6       0.10
+7       0.20
+8       0.30
+9       0.20
+10      0.10
+11      0.05
+
+Objective: To use simulation to determine when Wozac should begin production for this order so that there is a high probability of completing it by the due date.

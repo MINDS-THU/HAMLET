@@ -1,0 +1,11 @@
+GF Auto Corporation is developing a new model of compact car. This car is assumed to generate sales for the next five years. GF has gathered information about the following quantities through focus groups with the marketing and engineering departments.
+
+- Fixed cost of developing car. This cost is assumed to $700 million. The fixed cost is incurred at the beginning of year 1, before any sales are recorded.
+- Margin per car. This is the unit selling price minus the variable cost of producing a car. GF assumes that in year 1, the margin will be $4000. Every other year, GF assumes the margin will decrease by 4%. (The margin decreases because the company assumes variable costs tend to increase through time, whereas selling prices tend to remain fairly constant through time.)
+- Sales. The demand for the car is the uncertain quantity. In its first year, GF assumes sales—number of cars sold—will be triangularly distributed with parameters 50,000, 75,000, and 85,000. Every year after that, the company assumes that sales will decrease by some percentage, where this percentage is triangularly distributed with parameters 5%, 8%, and 10%. GF also assumes that the percentage decreases in successive years are independent of one another.
+- Depreciation and taxes. The company will depreciate its development cost on a straight-line basis over the lifetime of the car. The corporate tax rate is 40%.
+- Discount rate. GF figures its cost of capital at 10%.
+
+Given these assumptions, GF wants to develop a simulation model that will evaluate its NPV of after-tax cash flows for this new car over the five-year time horizon.
+
+Objective: To simulate the cash flows from the new car model, from the development time to the end of its life cycle, so that GF can estimate the NPV of after-tax cash flows from this car.

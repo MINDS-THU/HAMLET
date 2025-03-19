@@ -1,0 +1,14 @@
+[
+    {
+        "input": {
+            "pop": 40.0,
+            "rnb": 25.0,
+            "constraint1": 10000.0,
+            "constraint2": 180.0,
+            "constraint3": 0.38461538461538464
+        },
+        "output": [
+            65.0
+        ]
+    }
+]
