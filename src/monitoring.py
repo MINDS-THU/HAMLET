@@ -28,7 +28,9 @@ from rich.text import Text
 from rich.tree import Tree
 
 from src.utils import escape_code_brackets
-
+import os
+import atexit
+from datetime import datetime
 
 __all__ = ["AgentLogger", "LogLevel", "Monitor"]
 
@@ -84,9 +86,21 @@ YELLOW_HEX = "#d4b702"
 
 
 class AgentLogger:
-    def __init__(self, level: LogLevel = LogLevel.INFO):
+    def __init__(self, level: LogLevel = LogLevel.INFO, save_to_file=None, name=None):
         self.level = level
+        self.save_to_file = save_to_file
         self.console = Console()
+        self.log_file = None
+        self.name = name
+        if self.save_to_file:
+            # Step 1: Clear the file first (overwrite)
+            with open(self.save_to_file, "w", encoding="utf-8"):
+                pass  # This opens and immediately clears the file
+
+            # Step 2: Reopen in append mode for logging
+            os.makedirs(os.path.dirname(self.save_to_file), exist_ok=True)
+            self.log_file = open(self.save_to_file, "a", encoding="utf-8")
+            atexit.register(self._cleanup)
 
     def log(self, *args, level: str | LogLevel = LogLevel.INFO, **kwargs) -> None:
         """Logs a message to the console.
@@ -99,8 +113,47 @@ class AgentLogger:
         if level <= self.level:
             self.console.print(*args, **kwargs)
 
+    def save_execution_outputs(self, execution_outputs_console: str):
+        # Combine the Text objects
+        combined = Text.assemble(*execution_outputs_console)
+
+        # Get plain string (no styles)
+        plain_output = combined.plain
+        # Combine the Text objects
+        combined = Text.assemble(*execution_outputs_console)
+
+        # Get plain string (no styles)
+        plain_output = combined.plain
+
+        string_output = f"======== {self.name} ========\n"+"{}".format(plain_output)
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
+
+    def save_outcome(self, deal, deal_price, rounds, utility, sanity_checks, knowledge):
+        string_output = f"======== {self.name} ========\n"
+        string_output += "  deal: {}\n  deal_price: {}\n  rounds: {}\n  utility: {}\n  sanity_checks: {}\n  knowledge: {}".format(deal, deal_price, rounds, utility, sanity_checks, knowledge)
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
+
+    def _cleanup(self):
+        if self.log_file:
+            self.log_file.close()
+
     def log_error(self, error_message: str) -> None:
         self.log(escape_code_brackets(error_message), style="bold red", level=LogLevel.ERROR)
+
+        string_output = f"======== {self.name} ========\n"+error_message
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
 
     def log_markdown(self, content: str, title: Optional[str] = None, level=LogLevel.INFO, style=YELLOW_HEX) -> None:
         markdown_content = Syntax(
@@ -124,6 +177,13 @@ class AgentLogger:
         else:
             self.log(markdown_content, level=level)
 
+        string_output = f"======== {self.name} ========\n"+"{}\n{}".format(title, content)
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
+
     def log_code(self, title: str, content: str, level: int = LogLevel.INFO) -> None:
         self.log(
             Panel(
@@ -140,6 +200,13 @@ class AgentLogger:
             level=level,
         )
 
+        string_output = f"======== {self.name} ========\n"+"{}\n{}".format(title, content)
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
+
     def log_rule(self, title: str, level: int = LogLevel.INFO) -> None:
         self.log(
             Rule(
@@ -149,6 +216,13 @@ class AgentLogger:
             ),
             level=LogLevel.INFO,
         )
+
+        string_output = f"======== {self.name} ========\n"+"{}".format(title)
+        log_entry = f"{string_output}\n"
+        
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
 
     def log_task(self, content: str, subtitle: str, title: Optional[str] = None, level: int = LogLevel.INFO) -> None:
         self.log(

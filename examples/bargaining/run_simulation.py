@@ -212,14 +212,15 @@ def eventbatch2text(time, event_batch, deal, latest_offer, event_list):
         assert time == event.scheduled_time
         if event.event_type == "make_offer":
             res += "{} has proposed a new offer:\n{}\n".format(event.agent_name, event.event_content)
-            latest_offer = deepcopy(event.event_content)
-            event_summary[initial_agent_name].append(latest_offer['price'])
+            latest_offer[event.agent_name] = deepcopy(event.event_content)
+            event_summary[initial_agent_name].append(latest_offer[event.agent_name]['price'])
         elif event.event_type == 'respond_to_offer':
             if event.event_content['response']:
                 res += "{} has accepted your offer.\n".format(event.agent_name)
                 deal = True
                 terminate = True
                 event_summary[initial_agent_name].append('accept')
+                del latest_offer[event.agent_name] # keep only the accepted offer
             else:
                 res += "{} has rejected your offer.\n".format(event.agent_name)
                 event_summary[initial_agent_name].append('reject')
@@ -239,7 +240,7 @@ def eventbatch2text(time, event_batch, deal, latest_offer, event_list):
 def start_negotiating(agents):
     terminal_tools = ['wait_for_response', 'wait_for_time_period', 'quit_negotiation']
     deal = False
-    latest_offer = None
+    latest_offer = {}
     event_list = [] # [{"agent_name": ..., "events": ...}]
     agents["buyer"].run(
     "Please initiate negotiation.",
@@ -309,12 +310,12 @@ if __name__ == "__main__":
     seller_model = LiteLLMModel(model_id="gpt-4o", api_key=openai_api_key) # Could use 'gpt-4o'
     
     # load amazon dataset
-    num_listings = 10
+    num_listings = 100
     with open("./examples/bargaining/datasets/amazon/processed_data.json", "r") as file:
         processed_data = json.load(file)
     selected_listings = sample_unique_items(processed_data, num_listings)
-    buyer_fraction_range = [0.4, 0.6]
-    seller_fraction_range = [0.4, 0.6]
+    buyer_fraction_range = [0.5, 1.0]
+    seller_fraction_range = [0.25, 1.0]
     
     outcome_list = []
 
@@ -343,12 +344,24 @@ if __name__ == "__main__":
         print("==== Scenario {} ====".format(i))
         pprint(listing)
 
-        buyer = BargainingAgent(role='buyer', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=buyer_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG)
-        seller = BargainingAgent(role='seller', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], model=seller_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG)
+        buyer = BargainingAgent(role='buyer', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], 
+                                model=buyer_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG, save_to_file=f"E:\\SynologyDrive\\SynologyDrive\\Research\\Projects\\COOPA\\examples\\bargaining\\log\\b4os4o_exp_{i}.txt")
+        seller = BargainingAgent(role='seller', scenario_data=listing, tools=[make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation], 
+                                 model=seller_model, add_base_tools=True, verbosity_level=LogLevel.DEBUG, save_to_file=f"E:\\SynologyDrive\\SynologyDrive\\Research\\Projects\\COOPA\\examples\\bargaining\\log\\b4os4o_exp_{i}.txt")
 
         deal, latest_offer, event_list = start_negotiating({"buyer":buyer, "seller":seller})
+        print("==========================")
+        print(latest_offer)
         if deal:
-            deal_price = latest_offer['price']
+            # deal_price = latest_offer['price']
+            if "buyer" in latest_offer:
+                assert "seller" not in latest_offer
+                deal_price = latest_offer["buyer"]['price']
+            elif "seller" in latest_offer:
+                assert "buyer" not in latest_offer
+                deal_price = latest_offer["seller"]['price']
+            else:
+                raise ValueError("Invalid lastest_offer {}".format(latest_offer))
         else:
             deal_price = None
         if event_list == []:
@@ -366,6 +379,11 @@ if __name__ == "__main__":
                 "seller_sanity_check_results": final_outcome["seller_sanity_check_results"],
             }
         )
+        buyer.logger.save_outcome(deal=final_outcome["deal"], deal_price=deal_price, rounds=len(final_outcome["event_list"]), utility=final_outcome["buyer_utility"], sanity_checks=final_outcome["buyer_sanity_check_results"], 
+                                  knowledge={"listing_price":listing['listing_price'], "buyer_value":buyer_bottomline_price})
+        seller.logger.save_outcome(deal=final_outcome["deal"], deal_price=deal_price, rounds=len(final_outcome["event_list"]), utility=final_outcome["seller_utility"], sanity_checks=final_outcome["seller_sanity_check_results"],
+                                   knowledge={"listing_price":listing['listing_price'], "seller_cost":seller_bottomline_price})
+
         buyer.memory.reset()
         buyer.monitor.reset()
         seller.memory.reset()

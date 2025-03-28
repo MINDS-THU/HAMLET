@@ -191,6 +191,7 @@ class MultiStepAgent:
         max_steps: int = 20,
         add_base_tools: bool = False,
         verbosity_level: LogLevel = LogLevel.INFO,
+        save_to_file: Optional[str] = None,
         grammar: Optional[Dict[str, str]] = None,
         managed_agents: Optional[List] = None,
         step_callbacks: Optional[List[Callable]] = None,
@@ -221,7 +222,7 @@ class MultiStepAgent:
         self.input_messages = None
         self.task = None
         self.memory = AgentMemory(self.system_prompt)
-        self.logger = AgentLogger(level=verbosity_level)
+        self.logger = AgentLogger(level=verbosity_level, save_to_file=save_to_file, name=self.name)
         self.monitor = Monitor(self.model, self.logger)
         self.step_callbacks = step_callbacks if step_callbacks is not None else []
         self.step_callbacks.append(self.monitor.update_metrics)
@@ -1263,6 +1264,7 @@ class BargainingAgent(MultiStepAgent):
         self.role = role
         self.scenario_data = scenario_data
         super().__init__(
+            name=role,
             tools=tools,
             model=model,
             prompt_templates=prompt_templates,
@@ -1404,5 +1406,7 @@ class BargainingAgent(MultiStepAgent):
             ),
         ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+        self.logger.save_execution_outputs(execution_outputs_console)
+
         memory_step.action_output = output
         return output if terminate else None
