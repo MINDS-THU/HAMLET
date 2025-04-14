@@ -1,0 +1,18 @@
+{
+    "total_valid_exps": 10,
+    "avg_deal": 1.0,
+    "avg_list_price": 473.4839999999999,
+    "avg_rounds": 9.2,
+    "avg_utility": {
+        "buyer": 3.2670000000000003,
+        "seller": 212.93099999999998
+    },
+    "avg_proposed_worse_offer_than_rejected": {
+        "buyer": 0.1,
+        "seller": 0.0
+    },
+    "avg_accepted_worse_offer_later": {
+        "buyer": 0.0,
+        "seller": 0.0
+    }
+}

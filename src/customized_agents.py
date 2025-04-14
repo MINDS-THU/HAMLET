@@ -1258,7 +1258,7 @@ class BargainingAgent(MultiStepAgent):
         self.authorized_imports = list(set(BASE_BUILTIN_MODULES) | set(self.additional_authorized_imports))
         self.max_print_outputs_length = max_print_outputs_length
         prompt_templates = prompt_templates or yaml.safe_load(
-            importlib.resources.files("src.prompts").joinpath("bargaining_agent.yaml").read_text()
+            importlib.resources.files("src.prompts").joinpath("bargaining_agent_v2.yaml").read_text(encoding="utf-8")
         )
         assert role in ["buyer", "seller"]
         self.role = role
@@ -1318,6 +1318,7 @@ class BargainingAgent(MultiStepAgent):
                 ),
             },
         )
+        # print(system_prompt)
         return system_prompt
 
     def step(self, memory_step: ActionStep, terminal_tools: Optional[List[str]] = None) -> bool:

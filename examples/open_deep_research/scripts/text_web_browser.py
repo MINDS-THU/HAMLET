@@ -428,9 +428,9 @@ DO NOT use this tool for .pdf or .txt or .htm files: for these types of files us
         content_type = response.headers.get("content-type", "")
         extension = mimetypes.guess_extension(content_type)
         if extension and isinstance(extension, str):
-            new_path = f"./downloads/file{extension}"
+            new_path = f"./examples/open_deep_research/downloads/file{extension}"
         else:
-            new_path = "./downloads/file.object"
+            new_path = "./examples/open_deep_research/downloads/file.object"
 
         with open(new_path, "wb") as f:
             f.write(response.content)

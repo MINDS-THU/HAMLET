@@ -1,0 +1,557 @@
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: I will initiate the negotiation by expressing interest in the item and ask if there is flexibility in the price. This will open up the dialogue and set the stage for negotiating towards a more favorable price.
+
+Code:
+```py
+message = send_message(agent_name="buyer", content="Hello! I'm interested in the Nespresso VertuoPlus Coffee and Espresso Machine. Is there any flexibility in the price?")
+print(message)
+```
+======== buyer ========
+Executing parsed code:
+message = send_message(agent_name="buyer", content="Hello! I'm interested in the Nespresso VertuoPlus Coffee and Espresso Machine. Is there any flexibility in the price?")
+print(message)
+======== buyer ========
+Execution logs:A message has been sent.
+Out: None
+======== buyer ========
+Step 2
+======== buyer ========
+Output message of the LLM:
+Thought: I have initiated the negotiation by sending a message to the seller. Now, I need to wait for their response before making any further moves. This will allow me to gauge their openness to negotiation and adjust my strategy accordingly.
+
+Code:
+```py
+response = wait_for_response(agent_name="buyer")
+print(response)
+```
+======== buyer ========
+Executing parsed code:
+response = wait_for_response(agent_name="buyer")
+print(response)
+======== buyer ========
+Out - Final step: Waiting for the opponent's response.
+======== seller ========
+Step 1
+======== seller ========
+Output message of the LLM:
+Starting a negotiation with the buyer, it's essential to emphasize the value of the product. I'll provide a strong initial position by highlighting the features and benefits of the Nespresso VertuoPlus to justify the listing price while also indicating that there might be room for negotiation to keep the discussion open. This way, we maintain control and set the reference point.
+
+Let's begin by crafting a response.
+
+Thought: I will respond to the buyer, emphasizing the quality and value of the Nespresso VertuoPlus Coffee and Espresso Machine and indicating that while the listing price reflects this value, I am open to considering reasonable offers. This will set a positive tone for the negotiation while establishing the product's worth.
+
+Code:
+```py
+message = send_message(agent_name="seller", content="Hello! The Nespresso VertuoPlus is an exceptional coffee and espresso machine with advanced features, ensuring a superb brewing experience. The listing price accurately reflects its quality and capabilities. However, I am open to considering reasonable offers. What price do you have in mind?")
+print(message)
+```
+======== seller ========
+Executing parsed code:
+message = send_message(agent_name="seller", content="Hello! The Nespresso VertuoPlus is an exceptional coffee and espresso machine with advanced features, ensuring a superb brewing experience. The listing price accurately reflects its quality and capabilities. However, I am open to considering reasonable offers. What price do you have in mind?")
+print(message)
+======== seller ========
+Execution logs:A message has been sent.
+Out: None
+======== seller ========
+Step 2
+======== seller ========
+Output message of the LLM:
+The message has been successfully sent to the buyer. Now, I'll wait for their response to see what price they have in mind, which will inform my next steps in the negotiation.
+
+Thought: I will wait for the buyer's response to see what price they propose. Their next offer will guide my strategy on making counteroffers or engaging further in negotiation tactics.
+
+Code:
+```py
+response = wait_for_response(agent_name="seller")
+print(response)
+```
+======== seller ========
+Executing parsed code:
+response = wait_for_response(agent_name="seller")
+print(response)
+======== seller ========
+Out - Final step: Waiting for the opponent's response.
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has expressed openness to considering reasonable offers, which is a positive sign. My next step will be to make an initial offer below my bottomline price to begin the negotiation. This will give me room to make further concessions if needed. I will offer $100 as a starting point.
+
+Code:
+```py
+initial_offer = make_offer(agent_name="buyer", price=100, side_offer=None)
+print(initial_offer)
+```
+======== buyer ========
+Executing parsed code:
+initial_offer = make_offer(agent_name="buyer", price=100, side_offer=None)
+print(initial_offer)
+======== buyer ========
+Execution logs:A new offer has been sent.
+Out: None
+======== buyer ========
+Step 2
+======== buyer ========
+Output message of the LLM:
+Thought: I have made an initial offer of $100 to the seller. Now, I need to wait for the seller's response to see if they are willing to accept or counter my offer. This will help me understand their position and decide on the next steps for negotiation.
+
+Code:
+```py
+response = wait_for_response(agent_name="buyer")
+print(response)
+```Calling tools:
+[{'id': 'call_5', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'response = wait_for_response(agent_name="buyer")\nprint(response)'}}]
+======== buyer ========
+Executing parsed code:
+response = wait_for_response(agent_name="buyer")
+print(response)
+======== buyer ========
+Out - Final step: Waiting for the opponent's response.
+======== seller ========
+Step 1
+======== seller ========
+Output message of the LLM:
+The buyer has proposed a price of $100, which is below my bottomline price of $111.74. It's important to maintain the negotiation by emphasizing that this offer is too low, while actively engaging with a counteroffer.
+
+Thought: I will reject the buyer's offer since it is below my bottomline price, and present a counteroffer that is closer to our listing price to reinforce the value of the product. I'll aim to start with a counteroffer slightly below the listing price but well within my acceptable range.
+
+Code:
+```py
+response = respond_to_offer(agent_name="seller", response=False)
+print(response)
+
+counteroffer_price = 200  # Starting with a strategic high anchor close to the listing price
+counteroffer = make_offer(agent_name="seller", price=counteroffer_price, side_offer=None)
+print(counteroffer)
+```Calling tools:
+[{'id': 'call_1', 'type': 'function', 'function': {'name': 'respond_to_offer', 'arguments': 'agent_name="seller", response=False'}}, {'id': 'call_2', 'type': 'function', 'function': {'name': 'make_offer', 'arguments': 'agent_name="seller", price=200, side_offer=None'}}]
+======== seller ========
+Executing parsed code:
+response = respond_to_offer(agent_name="seller", response=False)
+print(response)
+
+counteroffer_price = 200  # Starting with a strategic high anchor close to the listing price
+counteroffer = make_offer(agent_name="seller", price=counteroffer_price, side_offer=None)
+print(counteroffer)
+======== seller ========
+Execution logs:A response to the offer has been sent.
+A new offer has been sent.
+Out: None
+======== seller ========
+Step 2
+======== seller ========
+Output message of the LLM:
+The buyer's offer has been rejected, and I have made a counteroffer of $200. Now, I will wait for the buyer's response to see if they are willing to negotiate further or accept this new offer.
+
+Thought: I will wait for the buyer's response to my counteroffer of $200. Their next move will help inform any future adjustments or concessions I might consider to move towards a favorable agreement.
+
+Code:
+```py
+response = wait_for_response(agent_name="seller")
+print(response)
+```
+======== seller ========
+Executing parsed code:
+response = wait_for_response(agent_name="seller")
+print(response)
+======== seller ========
+Out - Final step: Waiting for the opponent's response.
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has countered with a price of $200. This is above my bottomline price of $123.62. I will need to make another counteroffer closer to my limit to see if they are willing to lower their price. I will offer $115 as my next counteroffer to keep the negotiation moving in my favor. This still leaves me with a little room for adjustment if needed.
+
+Code:
+```py
+counter_offer = make_offer(agent_name="buyer", price=115, side_offer=None)
+print(counter_offer)
+```
+======== buyer ========
+Executing parsed code:
+counter_offer = make_offer(agent_name="buyer", price=115, side_offer=None)
+print(counter_offer)
+======== buyer ========
+Execution logs:A new offer has been sent.
+Out: None
+======== buyer ========
+Step 2
+======== buyer ========
+Output message of the LLM:
+Thought: I have made a counteroffer of $115. Now, I need to wait for the seller's response to see if they are willing to accept or come closer to my limit. This will help me refine my strategy and ensure the negotiation is moving in a favorable direction for me.
+
+Code:
+```py
+response = wait_for_response(agent_name="buyer")
+print(response)
+```Calling tools:
+[{'id': 'call_8', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'response = wait_for_response(agent_name="buyer")\nprint(response)'}}]
+======== buyer ========
+Executing parsed code:
+response = wait_for_response(agent_name="buyer")
+print(response)
+======== buyer ========
+Out - Final step: Waiting for the opponent's response.
+======== seller ========
+Step 1
+======== seller ========
+Output message of the LLM:
+The buyer's new offer of $115 is above my bottomline price of $111.74, yet still significantly lower than my counteroffer of $200. This new offer provides a middle ground for further negotiation.
+
+Thought: Since the buyer's offer of $115 is above my bottomline price, I can negotiate by making a counteroffer that is closer to this new offer, while still aiming to maximize my utility. I will propose a counteroffer that is strategically positioned midway, which might be more appealing to the buyer while preserving my leverage.
+
+Code:
+```py
+# Calculate a new counteroffer price that's a strategic midpoint
+midway_price = (200 + 115) / 2  # This is a good middle ground
+midway_price = round(midway_price, 2)  # Ensure the price is precise
+
+counteroffer = make_offer(agent_name="seller", price=midway_price, side_offer=None)
+print(counteroffer)
+```Calling tools:
+[{'id': 'call_6', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'midway_price = (200 + 115) / 2  # This is a good middle ground\nmidway_price = round(midway_price, 2)  # Ensure the price is precise\n\ncounteroffer = make_offer(agent_name="seller", price=midway_price, side_offer=None)\nprint(counteroffer)'}}]
+======== seller ========
+Executing parsed code:
+# Calculate a new counteroffer price that's a strategic midpoint
+midway_price = (200 + 115) / 2  # This is a good middle ground
+midway_price = round(midway_price, 2)  # Ensure the price is precise
+
+counteroffer = make_offer(agent_name="seller", price=midway_price, side_offer=None)
+print(counteroffer)
+======== seller ========
+Execution logs:A new offer has been sent.
+Out: None
+======== seller ========
+Step 2
+======== seller ========
+Output message of the LLM:
+I have sent a new counteroffer to the buyer, strategically positioned midway at $157.50. Now, it's important to wait for the buyer's response to this offer to assess their willingness to negotiate further or accept the deal.
+
+Thought: I will wait for the buyer's response to my counteroffer of $157.50. Their reaction will help in deciding whether to adjust the offer further or explore additional negotiation strategies.
+
+Code:
+```py
+response = wait_for_response(agent_name="seller")
+print(response)
+```Calling tools:
+[{'id': 'call_8', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'response = wait_for_response(agent_name="seller")\nprint(response)'}}]
+======== seller ========
+Executing parsed code:
+response = wait_for_response(agent_name="seller")
+print(response)
+======== seller ========
+Out - Final step: Waiting for the opponent's response.
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has now countered with a price of $157.5, which is still above my bottomline price of $123.62. I need to make another counteroffer that is just below my bottomline to see if the seller can come down to meet it. I will make a counteroffer of $123, signaling that I am very close to my limit.
+
+Code:
+```py
+final_counter_offer = make_offer(agent_name="buyer", price=123, side_offer=None)
+print(final_counter_offer)
+```
+======== buyer ========
+Executing parsed code:
+final_counter_offer = make_offer(agent_name="buyer", price=123, side_offer=None)
+print(final_counter_offer)
+======== buyer ========
+Execution logs:A new offer has been sent.
+Out: None
+======== buyer ========
+Step 2
+======== buyer ========
+Output message of the LLM:
+Thought: I have sent a final counteroffer of $123, which is close to my bottomline. Now, I need to wait for the seller's response to see if they are willing to accept this offer or counter with a price closer to my limit.
+
+Code:
+```py
+response = wait_for_response(agent_name="buyer")
+print(response)
+```Calling tools:
+[{'id': 'call_11', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'response = wait_for_response(agent_name="buyer")\nprint(response)'}}]
+======== buyer ========
+Executing parsed code:
+response = wait_for_response(agent_name="buyer")
+print(response)
+======== buyer ========
+Out - Final step: Waiting for the opponent's response.
+======== seller ========
+Step 1
+======== seller ========
+Output message of the LLM:
+The buyer has increased their offer to $123. This offer is higher than their previous and shows a willingness to negotiate; however, it is still lower than my midway counteroffer of $157.50. 
+
+Thought: Given that the current offer of $123 still holds a positive utility for me (since it is above my bottomline), I will negotiate further by proposing a counteroffer slightly higher than their $123 offer to bring it closer to my counteroffer. This will aim to gradually bring the buyer closer to an acceptable deal for both parties.
+
+Code:
+```py
+# Calculate a new counteroffer that is slightly above the buyer's latest offer
+next_counteroffer_price = (123 + 157.5) / 2  # Find a fair midpoint
+next_counteroffer_price = round(next_counteroffer_price, 2)
+
+counteroffer = make_offer(agent_name="seller", price=next_counteroffer_price, side_offer=None)
+print(counteroffer)
+```Calling tools:
+[{'id': 'call_9', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'next_counteroffer_price = (123 + 157.5) / 2  # Find a fair midpoint\nnext_counteroffer_price = round(next_counteroffer_price, 2)\n\ncounteroffer = make_offer(agent_name="seller", price=next_counteroffer_price, side_offer=None)\nprint(counteroffer)'}}]
+======== seller ========
+Executing parsed code:
+# Calculate a new counteroffer that is slightly above the buyer's latest offer
+next_counteroffer_price = (123 + 157.5) / 2  # Find a fair midpoint
+next_counteroffer_price = round(next_counteroffer_price, 2)
+
+counteroffer = make_offer(agent_name="seller", price=next_counteroffer_price, side_offer=None)
+print(counteroffer)
+======== seller ========
+Execution logs:A new offer has been sent.
+Out: None
+======== seller ========
+Step 2
+======== seller ========
+Output message of the LLM:
+I've sent a new counteroffer at $140.25, which is a midpoint between the buyer's offer of $123 and my previous counteroffer of $157.50. This approach should guide the buyer towards an offer closer to my target range.
+
+Thought: I will now wait for the buyer's response to see if they are willing to negotiate further and accept this new counteroffer, or if they will propose another price. This will help determine the direction of the negotiation.
+
+Code:
+```py
+response = wait_for_response(agent_name="seller")
+print(response)
+```Calling tools:
+[{'id': 'call_11', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'response = wait_for_response(agent_name="seller")\nprint(response)'}}]
+======== seller ========
+Executing parsed code:
+response = wait_for_response(agent_name="seller")
+print(response)
+======== seller ========
+Out - Final step: Waiting for the opponent's response.
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has made a new offer of $140.25. This is still above my bottomline of $123.62. Since I'm at my limit, I need to communicate to the seller that I can't go above my current offer of $123.
+
+Code:
+```py
+message = send_message(agent_name="buyer", content="Thank you for the counteroffer. I am really at the limit of my budget at $123. If you can accept, we have a deal. Otherwise, I may need to reconsider this purchase.")
+print(message)
+response = wait_for_response(agent_name="buyer")
+print(response)
+```
+======== buyer ========
+Executing parsed code:
+message = send_message(agent_name="buyer", content="Thank you for the counteroffer. I am really at the limit of my budget at $123. If you can accept, we have a deal. Otherwise, I may need to reconsider this purchase.")
+print(message)
+response = wait_for_response(agent_name="buyer")
+print(response)
+======== buyer ========
+Execution logs:A message has been sent.
+Out - Final step: Waiting for the opponent's response.
+======== seller ========
+Step 1
+======== seller ========
+Output message of the LLM:
+The buyer has indicated that $123 is their maximum budget and that they may withdraw if we cannot agree on this price. While this offer is above my bottomline price of $111.74, accepting it will not maximize my potential utility compared to my counteroffer of $140.25.
+
+Thought: Given the buyer's budget constraint and willingness to walk away, if I accept the $123 offer, I will secure a utility of $11.26. I must carefully assess if achieving this deal is more beneficial than no deal. Since the negotiation has indicated that a higher price may result in a lost sale, it may be strategic to close on this offer while ensuring a sale.
+
+Code:
+```py
+response = respond_to_offer(agent_name="seller", response=True)
+print(response)
+```
+======== seller ========
+Executing parsed code:
+response = respond_to_offer(agent_name="seller", response=True)
+print(response)
+======== seller ========
+Execution logs:A response to the offer has been sent.
+Out: None
+======== seller ========
+Step 2
+======== seller ========
+Output message of the LLM:
+I have accepted the buyer's offer of $123, achieving a utility of $11.26. This ensures a successful sale without risking a lost opportunity due to the buyer's budget constraints. The deal is finalized, and I have maximized my utility given the circumstances. Thank you for engaging in this negotiation process! If you need further assistance or have any questions, feel free to ask.
+======== seller ========
+Error in code parsing:
+Your code snippet is invalid, because the regex pattern ```(?:py|python)?\n(.*?)\n``` was not found in it.
+Here is your code snippet:
+I have accepted the buyer's offer of $123, achieving a utility of $11.26. This ensures a successful sale without risking a lost opportunity due to the buyer's budget constraints. The deal is finalized, and I have maximized my utility given the circumstances. Thank you for engaging in this negotiation process! If you need further assistance or have any questions, feel free to ask.
+Make sure to include code with the correct pattern, for instance:
+Thoughts: Your thoughts
+Code:
+```py
+# Your python code here
+```<end_code>
+Make sure to provide correct code blobs.
+======== seller ========
+Step 3
+======== seller ========
+Output message of the LLM:
+It seems I previously provided an explanation instead of following the proper format for code output. My apologies for the oversight. Let's correct that and finish up the negotiation correctly.
+
+Thought: I have successfully accepted the buyer's offer and completed the negotiation with a final price of $123. This ensures a sale is made, optimizing my utility within the boundaries presented by the buyer's budget.
+
+Code:
+```py
+# Finalize the negotiation, acknowledging the completion of the deal
+final_message = "The deal is successfully completed at $123. Thank you for the negotiation!"
+print(final_message)
+```
+======== seller ========
+Executing parsed code:
+# Finalize the negotiation, acknowledging the completion of the deal
+final_message = "The deal is successfully completed at $123. Thank you for the negotiation!"
+print(final_message)
+======== seller ========
+Execution logs:The deal is successfully completed at $123. Thank you for the negotiation!
+Out: None
+======== seller ========
+Step 4
+======== seller ========
+Output message of the LLM:
+The negotiation has been successfully concluded with a final sale price of $123. By accepting the buyer's offer, we ensured a closed deal and extracted a positive utility from the transaction. Thank you for participating in the negotiation process! If you have any additional questions or require further assistance, please feel free to ask.
+======== seller ========
+Error in code parsing:
+Your code snippet is invalid, because the regex pattern ```(?:py|python)?\n(.*?)\n``` was not found in it.
+Here is your code snippet:
+The negotiation has been successfully concluded with a final sale price of $123. By accepting the buyer's offer, we ensured a closed deal and extracted a positive utility from the transaction. Thank you for participating in the negotiation process! If you have any additional questions or require further assistance, please feel free to ask.
+Make sure to include code with the correct pattern, for instance:
+Thoughts: Your thoughts
+Code:
+```py
+# Your python code here
+```<end_code>
+Make sure to provide correct code blobs.
+======== seller ========
+Step 5
+======== seller ========
+Output message of the LLM:
+It appears I made the mistake once more by not adhering to the specified format. Let's rectify this by following the correct pattern:
+
+Thought: I am concluding the negotiation, noting that the transaction was successfully completed with the buyer at the agreed price of $123. This secured a positive utility for the product sale, aligning with the constraints of the negotiation.
+
+Code:
+```py
+# Conclude by confirming the successful transaction
+conclusion_message = "The negotiation is successfully closed at $123. Thank you for participating!"
+print(conclusion_message)
+```
+======== seller ========
+Executing parsed code:
+# Conclude by confirming the successful transaction
+conclusion_message = "The negotiation is successfully closed at $123. Thank you for participating!"
+print(conclusion_message)
+======== seller ========
+Execution logs:The negotiation is successfully closed at $123. Thank you for participating!
+Out: None
+======== buyer ========
+Step 1
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has accepted my offer of $123, which is well within my bottomline price, maximizing my utility in this negotiation. I will now confirm the final deal and complete the negotiation.
+
+Code:
+```py
+final_response = send_message(agent_name="buyer", content="Great! Thank you for accepting my offer. Let's proceed with the transaction at $123.")
+print(final_response)
+```Calling tools:
+[{'id': 'call_15', 'type': 'function', 'function': {'name': 'python_interpreter', 'arguments': 'final_response = send_message(agent_name="buyer", content="Great! Thank you for accepting my offer. Let\'s proceed with the transaction at $123.")\nprint(final_response)'}}]
+======== buyer ========
+Executing parsed code:
+final_response = send_message(agent_name="buyer", content="Great! Thank you for accepting my offer. Let's proceed with the transaction at $123.")
+print(final_response)
+======== buyer ========
+Execution logs:A message has been sent.
+Out: None
+======== buyer ========
+Step 2
+======== buyer ========
+Output message of the LLM:
+The negotiation has been successfully concluded with the seller accepting the offer of $123. This price is well within my acceptable range, maximizing my utility. The transaction can now proceed as agreed.
+
+Final Answer: The deal has been successfully made at $123.
+======== buyer ========
+Error in code parsing:
+Your code snippet is invalid, because the regex pattern ```(?:py|python)?\n(.*?)\n``` was not found in it.
+            Here is your code snippet:
+            The negotiation has been successfully concluded with the seller accepting the offer of $123. This price is well within my acceptable range, maximizing my utility. The transaction can now proceed as agreed.
+
+Final Answer: The deal has been successfully made at $123.
+            Make sure to include code with the correct pattern, for instance:
+            Thoughts: Your thoughts
+            Code:
+            ```py
+            # Your python code here
+            ```<end_code>
+Make sure to provide correct code blobs.
+======== buyer ========
+Step 3
+======== buyer ========
+Output message of the LLM:
+Thought: The seller has accepted the offer of $123, and the negotiation was successful. I will finalize the transaction and wrap up the negotiation process.
+
+Code:
+```py
+final_response = send_message(agent_name="buyer", content="Great! Thank you for accepting my offer. Let's proceed with the transaction at $123.")
+print("The deal has been successfully made at $123.")
+```
+
+======== buyer ========
+Executing parsed code:
+final_response = send_message(agent_name="buyer", content="Great! Thank you for accepting my offer. Let's proceed with the transaction at $123.")
+print("The deal has been successfully made at $123.")
+======== buyer ========
+Execution logs:The deal has been successfully made at $123.
+Out: None
+======== buyer ========
+Step 4
+======== buyer ========
+Output message of the LLM:
+The negotiation has been successfully concluded, with the seller accepting the offer of $123. This result is within my acceptable range, maximizing my utility. The transaction can now proceed as agreed.
+======== buyer ========
+Error in code parsing:
+Your code snippet is invalid, because the regex pattern ```(?:py|python)?\n(.*?)\n``` was not found in it.
+Here is your code snippet:
+The negotiation has been successfully concluded, with the seller accepting the offer of $123. This result is within my acceptable range, maximizing my utility. The transaction can now proceed as agreed.
+Make sure to include code with the correct pattern, for instance:
+Thoughts: Your thoughts
+Code:
+```py
+# Your python code here
+```<end_code>
+Make sure to provide correct code blobs.
+======== buyer ========
+Step 5
+======== buyer ========
+Output message of the LLM:
+Thought: I will confirm the successful conclusion of the negotiation and state that the transaction can now proceed as agreed upon at the price of $123.
+
+Code:
+```py
+print("The negotiation has been successfully concluded. The seller has accepted the offer of $123, and the transaction can now proceed.")
+```
+======== buyer ========
+Executing parsed code:
+print("The negotiation has been successfully concluded. The seller has accepted the offer of $123, and the transaction can now proceed.")
+======== buyer ========
+Execution logs:The negotiation has been successfully concluded. The seller has accepted the offer of $123, and the transaction can now proceed.
+Out: None
+======== buyer ========
+  deal: True
+  deal_price: 123
+  rounds: 10
+  utility: 0.62
+  sanity_checks: {'accepted_worse_offer_later': False, 'proposed_worse_offer_than_rejected': False}
+  knowledge: {'listing_price': 219.0, 'buyer_value': 123.62}
+======== seller ========
+  deal: True
+  deal_price: 123
+  rounds: 10
+  utility: 11.26
+  sanity_checks: {'accepted_worse_offer_later': False, 'proposed_worse_offer_than_rejected': False}
+  knowledge: {'listing_price': 219.0, 'seller_cost': 111.74}

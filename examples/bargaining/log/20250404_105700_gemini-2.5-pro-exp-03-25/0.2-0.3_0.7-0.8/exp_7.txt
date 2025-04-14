@@ -1,0 +1,21 @@
+======== buyer ========
+Step 1
+======== buyer ========
+Error in generating model output:
+litellm.APIConnectionError: No module named 'google.auth'
+Traceback (most recent call last):
+  File "E:\Software\Anaconda\Lib\site-packages\litellm\main.py", line 2419, in completion
+    model_response = vertex_chat_completion.completion(  # type: ignore
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Software\Anaconda\Lib\site-packages\litellm\llms\vertex_ai\gemini\vertex_and_google_ai_studio_gemini.py", line 1204, in completion
+    _auth_header, vertex_project = self._ensure_access_token(
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Software\Anaconda\Lib\site-packages\litellm\llms\vertex_ai\vertex_llm_base.py", line 138, in _ensure_access_token
+    self._credentials, cred_project_id = self.load_auth(
+                                         ^^^^^^^^^^^^^^^
+  File "E:\Software\Anaconda\Lib\site-packages\litellm\llms\vertex_ai\vertex_llm_base.py", line 40, in load_auth
+    import google.auth as google_auth
+ModuleNotFoundError: No module named 'google.auth'
+
+======== buyer ========
+Step 2

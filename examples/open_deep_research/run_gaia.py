@@ -11,13 +11,13 @@ import datasets
 import pandas as pd
 from dotenv import load_dotenv
 from huggingface_hub import login
-from scripts.reformulator import prepare_response
-from scripts.run_agents import (
+from .scripts.reformulator import prepare_response
+from .scripts.run_agents import (
     get_single_file_description,
     get_zip_description,
 )
-from scripts.text_inspector_tool import TextInspectorTool
-from scripts.text_web_browser import (
+from .scripts.text_inspector_tool import TextInspectorTool
+from .scripts.text_web_browser import (
     ArchiveSearchTool,
     FinderTool,
     FindNextTool,
@@ -27,15 +27,16 @@ from scripts.text_web_browser import (
     SimpleTextBrowser,
     VisitTool,
 )
-from scripts.visual_qa import visualizer
+from .scripts.visual_qa import visualizer
 from tqdm import tqdm
 
-from smolagents import (
+from src import (
     CodeAgent,
     # HfApiModel,
     LiteLLMModel,
     Model,
     ToolCallingAgent,
+    LogLevel,
 )
 
 
@@ -66,7 +67,8 @@ AUTHORIZED_IMPORTS = [
     "csv",
 ]
 load_dotenv(override=True)
-login(os.getenv("HF_TOKEN"))
+login("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")
+openai_api_key = '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'
 
 append_answer_lock = threading.Lock()
 
@@ -74,8 +76,8 @@ append_answer_lock = threading.Lock()
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--model-id", type=str, default="o1")
-    parser.add_argument("--run-name", type=str, required=True)
+    parser.add_argument("--model-id", type=str, default="gpt-4o")
+    parser.add_argument("--run-name", type=str, default="debug")
     return parser.parse_args()
 
 
@@ -91,13 +93,13 @@ custom_role_conversions = {"tool-call": "assistant", "tool-response": "user"}
 
 ### LOAD EVALUATION DATASET
 
-eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
+eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all", trust_remote_code=True)[SET]
 eval_ds = eval_ds.rename_columns({"Question": "question", "Final answer": "true_answer", "Level": "task"})
 
 
 def preprocess_file_paths(row):
     if len(row["file_name"]) > 0:
-        row["file_name"] = f"data/gaia/{SET}/" + row["file_name"]
+        row["file_name"] = f"./examples/open_deep_research/data/gaia/{SET}/" + row["file_name"]
     return row
 
 
@@ -115,10 +117,10 @@ BROWSER_CONFIG = {
         "headers": {"User-Agent": user_agent},
         "timeout": 300,
     },
-    "serpapi_key": os.getenv("SERPAPI_API_KEY"),
+    "serpapi_key": "7f825975b8c048b2f4515d1513e343c9574c07724f29470c967020ce74ef1772",
 }
 
-os.makedirs(f"./{BROWSER_CONFIG['downloads_folder']}", exist_ok=True)
+os.makedirs(f"./examples/open_deep_research/{BROWSER_CONFIG['downloads_folder']}", exist_ok=True)
 
 
 def create_agent_hierarchy(model: Model):
@@ -141,7 +143,7 @@ def create_agent_hierarchy(model: Model):
         model=model,
         tools=WEB_TOOLS,
         max_steps=20,
-        verbosity_level=2,
+        verbosity_level=LogLevel.DEBUG,
         planning_interval=4,
         name="search_agent",
         description="""A team member that will search the internet to answer your question.
@@ -160,7 +162,7 @@ def create_agent_hierarchy(model: Model):
         model=model,
         tools=[visualizer, ti_tool],
         max_steps=12,
-        verbosity_level=2,
+        verbosity_level=LogLevel.DEBUG,
         additional_authorized_imports=AUTHORIZED_IMPORTS,
         planning_interval=4,
         managed_agents=[text_webbrowser_agent],
@@ -182,6 +184,7 @@ def answer_single_question(example, model_id, answers_file, visual_inspection_to
         "model_id": model_id,
         "custom_role_conversions": custom_role_conversions,
         "max_completion_tokens": 8192,
+        "api_key": openai_api_key
     }
     if model_id == "o1":
         model_params["reasoning_effort"] = "high"
@@ -279,7 +282,7 @@ def main():
     args = parse_args()
     print(f"Starting run with arguments: {args}")
 
-    answers_file = f"output/{SET}/{args.run_name}.jsonl"
+    answers_file = f"./examples/open_deep_research/output/{SET}/{args.run_name}.jsonl"
     tasks_to_run = get_examples_to_answer(answers_file, eval_ds)
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as exe:
