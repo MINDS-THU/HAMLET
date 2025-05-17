@@ -27,7 +27,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from src.utils import escape_code_brackets
+from smolagents.utils import escape_code_brackets
 import os
 import atexit
 from datetime import datetime

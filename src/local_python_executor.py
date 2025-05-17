@@ -28,8 +28,8 @@ from importlib.util import find_spec
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from .tools import Tool
-from .utils import BASE_BUILTIN_MODULES, truncate_content
+from smolagents.tools import Tool
+from smolagents.utils import BASE_BUILTIN_MODULES, truncate_content
 
 
 logger = logging.getLogger(__name__)

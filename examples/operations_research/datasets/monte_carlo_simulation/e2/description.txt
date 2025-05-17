@@ -1,5 +1,0 @@
-The Yakkon Company sells a popular camera for $400. This camera carries a warranty such that if the camera fails within 1.5 years, the company gives the customer a new camera for free. If the camera fails after 1.5 years, the warranty is no longer in effect. Every replacement camera carries exactly the same warranty as the original camera, and the cost to the company of supplying a new camera is always $225. Use simulation to estimate, for a given sale, the number of replacements under warranty and the NPV of profit from the sale, using a discount rate of 8%.
-
-To model the distribution of time until failure, use Gamma distribution with mean 2.5 and standard deviation 1.
-
-Objective: To use simulation to estimate the number of replacements under warranty and the total NPV of profit from a given sale.

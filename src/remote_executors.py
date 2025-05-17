@@ -27,9 +27,9 @@ from typing import Any, Dict, List, Tuple
 import requests
 from PIL import Image
 
-from .local_python_executor import PythonExecutor
-from .monitoring import LogLevel
-from .tools import Tool, get_tools_definition_code
+from src.local_python_executor import PythonExecutor
+from src.monitoring import LogLevel
+from smolagents.tools import Tool, get_tools_definition_code
 
 
 try:
