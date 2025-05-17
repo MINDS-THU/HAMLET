@@ -11,8 +11,15 @@ From root of `COOPA`, execute
 ```bash
 pip install -r requirements.txt
 ```
+### 3. Configure Environment Variables
 
-### 3. Run an App
+Create a `.env` file in the root of `COOPA_v3` and add your API keys:
+
+```
+OPENAI_API_KEY=your_openai_api_key
+# Optionally, add other keys as needed
+```
+### 4. Run an App
 ```
 python -m apps.literature_survey.run
 ```
