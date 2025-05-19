@@ -179,6 +179,77 @@ kb_repo_management/
 * Any modified file is passed to `repo_indexer.update_file()` to update the semantic search index.
 * Tools are structured for use with LLM agents, but can also be used programmatically.
 
+### Example usage
+```python
+from general_tools.kb_repo_management.repo_indexer import RepoIndexer
+from general_tools.kb_repo_management.kb_repo_retrieval_tools import (
+    SemanticSearchKnowledgeBase,
+    KeywordSearchKnowledgeBase,
+    CopyFromKnowledgeBase,
+)
+from general_tools.kb_repo_management.kb_repo_maintanence_tools import (
+    ListKnowledgeBaseDirectory,
+    SeeKnowledgeBaseFile,
+    MoveOrRenameInKnowledgeBase,
+    DeleteFromKnowledgeBase,
+)
+from general_tools.kb_repo_management.kb_repo_addition_tools import (
+    WriteToKnowledgeBase,
+    CopyToKnowledgeBase,
+    AppendToKnowledgeBaseFile,
+)
+
+knowledge_base_directory = "apps/<your_app>/knowledge_base"
+# Instantiate indexer (auto sync + live updates) ---------------------------
+idx = RepoIndexer(
+    knowledge_base_directory,
+    watch=False,
+    index_dir=Path("apps/<your_app>/vector_store"),
+    embed_model="text-embedding-3-small",
+    openai_api_key=os.getenv("OPENAI_API_KEY_EMBEDDINGS"),
+)
+
+
+# Create the knowledge base retrieval agent
+kb_retrieval_tools = [
+    ListKnowledgeBaseDirectory(idx),
+    SeeKnowledgeBaseFile(idx),
+    CopyFromKnowledgeBase(idx, working_directory),
+    KeywordSearchKnowledgeBase(idx),
+    SemanticSearchKnowledgeBase(idx),
+]
+knowledge_retrieval_agent = ToolCallingAgent(
+    tools=kb_retrieval_tools,
+    model=LiteLLMModel(model_id=model_id),
+    max_steps=max_steps,
+    verbosity_level=verbosity_level,
+    name="knowledge_retrieval_agent",
+    description=description,
+)
+
+# Create the knowledge base curation agent
+kb_curation_tools = [
+    WriteToKnowledgeBase(idx),
+    CopyToKnowledgeBase(idx, working_directory),
+    AppendToKnowledgeBaseFile(idx),
+    ListKnowledgeBaseDirectory(idx),
+    SeeKnowledgeBaseFile(idx),
+    MoveOrRenameInKnowledgeBase(idx),
+    DeleteFromKnowledgeBase(idx),
+    SemanticSearchKnowledgeBase(idx),
+    KeywordSearchKnowledgeBase(idx),
+]
+knowledge_curation_agent = ToolCallingAgent(
+    tools=kb_curation_tools,
+    model=LiteLLMModel(model_id=model_id),
+    max_steps=max_steps,
+    verbosity_level=verbosity_level,
+    name="knowledge_curation_agent",
+    description=description,
+)
+
+```
+
 ---
 
 ## 🧪 Testing
