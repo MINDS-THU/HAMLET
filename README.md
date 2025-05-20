@@ -23,3 +23,9 @@ OPENAI_API_KEY=your_openai_api_key
 ```
 python -m apps.literature_survey.run
 ```
+
+---
+Features to add:
+- add compatibility with `.pdf`, `.html` files for `kb_repo_management/repo_indexer.py`
+- structured output specification and validation for `CodeAgent` and `ToolCallingAgent`, e.g. using [instructor](https://github.com/567-labs/instructor)
+- better experience retrieval and reuse, e.g. using [muscle-mem](https://github.com/567-labs/instructor)
