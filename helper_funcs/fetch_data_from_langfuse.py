@@ -6,7 +6,7 @@ import time
 from collections import defaultdict
 from langfuse.api.core.api_error import ApiError
 
-# ✅ Robust API wrapper
+# Robust API wrapper
 def robust_api_call(func, *args, sleep_between_calls=True, **kwargs):
     max_retries = 5
     base_delay = 1  # seconds
@@ -36,7 +36,7 @@ def robust_api_call(func, *args, sleep_between_calls=True, **kwargs):
                 raise
     raise RuntimeError("Max retries exceeded for API call")
 
-# ✅ Helper functions
+# Helper functions
 def get_span_kind(obs):
     return (obs.metadata or {}).get("attributes", {}).get("openinference.span.kind")
 
@@ -135,15 +135,24 @@ def process_session(session, save_dir):
             with open(f"{session_dir}/{role}.json", "w") as f:
                 json.dump(data, f, indent=4)
 
-# ✅ Main
 if __name__ == "__main__":
+    # Initialize Langfuse client
+    # Assuming that you have set up your langfuse cloud account and have created an existing project saving the data,
+    # then you can use the following code to fetch and process sessions saved under this project.
+    # Make sure to replace the secret_key and public_key with your actual keys.
+    # this will save the data in a directory called "finetuning_dataset" with the following structure:
+    # finetuning_dataset/
+    #   <session_id>/
+    #       <agent_name>.json
+    # each <agent_name>.json file will contain the conversation history for that agent in the session.
+
     langfuse = Langfuse(
-        secret_key="sk-lf-2cd0eaed-f9c8-42e2-99b5-106e70c2b6ef",
-        public_key="pk-lf-d49c8419-516a-4aea-93c3-0a311be86ac8",
+        secret_key="",
+        public_key="",
         host="https://cloud.langfuse.com",
     )
 
-    for page_num in range(24, 26):
+    for page_num in range(10): # this fetches the first 10 pages of sessions
         print(f"Fetching sessions for page {page_num}...")
         sessions = robust_api_call(langfuse.fetch_sessions, page=page_num).data
         print(f"Found {len(sessions)} sessions")

@@ -13,17 +13,16 @@ load_dotenv('./.env')
 
 import os
 import base64
- 
-# ✅ Set Langfuse OTEL environment variables
-LANGFUSE_PUBLIC_KEY = "pk-lf-c2f391d5-7aef-4827-9f20-69a624796ee2"
-LANGFUSE_SECRET_KEY = "sk-lf-b5339d7d-a627-45de-b4b0-03d7c0da3ad2"
+
+# Set Langfuse OTEL environment variables
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY_BARGAINING", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY_BARGAINING", "")
 LANGFUSE_AUTH = base64.b64encode(f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()).decode()
 
-os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://cloud.langfuse.com/api/public/otel"  # EU
+os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://cloud.langfuse.com/api/public/otel"
 os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {LANGFUSE_AUTH}"
-os.environ["HF_TOKEN"] = "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"  # Replace with yours if needed
 
-# ✅ Setup OpenTelemetry tracing
+# Setup OpenTelemetry tracing
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -32,15 +31,15 @@ from opentelemetry import trace
 trace_provider = TracerProvider()
 trace_provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter()))
 
-# ✅ Import your custom instrumentor
+# Import your custom instrumentor
 from src.custom_smolagents_instrumentor import CustomSmolagentsInstrumentor
 from openinference.instrumentation import using_session
 
 
 from smolagents import LiteLLMModel, InferenceClientModel, LogLevel, TransformersModel
 from src.base_agent import CodeAgent
-from apps.bargaining.tool_lib.code.simulation_tools import EventManager, make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation, SearchPrice
-from apps.bargaining.tool_lib.code.utils import negotiation_sanity_checks, eventbatch2text, get_current_timestamp, swtich_role
+from apps.bargaining.tool_lib.bargaining_simulation.bargaining_simulation_tools import EventManager, make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation, SearchPrice
+from apps.bargaining.tool_lib.bargaining_simulation.utils import negotiation_sanity_checks, eventbatch2text, get_current_timestamp, swtich_role
 
 
 def start_negotiating(agents):
