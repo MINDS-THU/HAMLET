@@ -3,6 +3,7 @@ import os
 from typing import Any
 import importlib.util
 
+
 class ListDir(Tool):
     name = "list_dir"
     description = (
@@ -17,7 +18,10 @@ class ListDir(Tool):
         self.working_dir = working_dir
 
     def forward(self, directory: str) -> str:
-        chosen_dir = os.path.join(self.working_dir, directory)
+        try:
+            chosen_dir = self._safe_path(directory)
+        except PermissionError as e:
+            return str(e)
         if not os.path.exists(chosen_dir):
             return f"The directory {directory} does not exist. Please start checking from the root directory."
         files = os.listdir(chosen_dir)
@@ -26,12 +30,21 @@ class ListDir(Tool):
         else:
             return '\n'.join(files)
 
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
+
 
 class SeeFile(Tool):
     name = "see_file"
     description = (
         "View the content of a chosen plain text file (e.g., .txt, .md, .py, .log). "
         "Not suitable for binary files such as .pdf, .docx, .xlsx, or images."
+        "Note: only files under the working directory are accessible."
     )
     inputs = {"filename": {"type": "string", "description": "Name of the file to check."}}
     output_type = "string"
@@ -41,7 +54,10 @@ class SeeFile(Tool):
         self.working_dir = working_dir
 
     def forward(self, filename: str) -> str:
-        filepath = os.path.join(self.working_dir, filename)
+        try:
+            filepath = self._safe_path(filename)
+        except PermissionError as e:
+            return str(e)
         if not os.path.exists(filepath):
             return f"The file {filename} does not exist."
         with open(filepath, "r") as file:
@@ -49,6 +65,13 @@ class SeeFile(Tool):
         formatted_lines = [f"{i+1}:{line}" for i, line in enumerate(lines)]
         return "".join(formatted_lines)
 
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
 
 class ModifyFile(Tool):
     name = "modify_file"
@@ -70,19 +93,27 @@ class ModifyFile(Tool):
         self.working_dir = working_dir
 
     def forward(self, filename: str, start_line: int, end_line: int, new_content: str) -> str:
-        filepath = os.path.join(self.working_dir, filename)
+        try:
+            filepath = self._safe_path(filename)
+        except PermissionError as e:
+            return str(e)
         if not os.path.exists(filepath):
             return f"The file {filename} does not exist."
-
         with open(filepath, "r+") as file:
             lines = file.readlines()
             lines[start_line - 1:end_line] = [new_content + "\n"]
             file.seek(0)
             file.truncate()
             file.write("".join(lines))
-
         return "Content modified."
 
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
 
 class CreateFileWithContent(Tool):
     name = "create_file_with_content"
@@ -101,10 +132,21 @@ class CreateFileWithContent(Tool):
         self.working_dir = working_dir
 
     def forward(self, filename: str, content: str) -> str:
-        filepath = os.path.join(self.working_dir, filename)
+        try:
+            filepath = self._safe_path(filename)
+        except PermissionError as e:
+            return str(e)
         with open(filepath, "w") as file:
             file.write(content)
         return "File created successfully."
+
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
 
 class SearchKeyword(Tool):
     name = "search_keyword"
@@ -128,7 +170,10 @@ class SearchKeyword(Tool):
         self.working_dir = working_dir
 
     def forward(self, path: str, keyword: str, context_lines: int) -> str:
-        target_path = os.path.join(self.working_dir, path)
+        try:
+            target_path = self._safe_path(path)
+        except PermissionError as e:
+            return str(e)
         if not os.path.exists(target_path):
             return f"The path '{path}' does not exist."
 
@@ -174,6 +219,63 @@ class SearchKeyword(Tool):
 
         return f"--- Matches in [{display_path}] ---\n" + "\n".join(formatted_output)
 
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
+
+class DeleteFileOrFolder(Tool):
+    name = "delete_file_or_folder"
+    description = (
+        "Delete a specified file or folder. This action is irreversible."
+        "If no filename is provided, the tool will delete everything in the working directory."
+        "Only files under the allowed working directory are accessible."
+    )
+    inputs = {"filename": {"type": "string", "description": "Name of the file or folder to delete."}}
+    output_type = "string"
+
+    def __init__(self, working_dir):
+        super().__init__()
+        self.working_dir = working_dir
+    
+    def forward(self, filename: str) -> str:
+        if filename == "":
+            abs_working_dir = os.path.abspath(self.working_dir)
+            # Only delete inside the working directory
+            for root, dirs, files in os.walk(abs_working_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+            return "All files and folders in the working directory have been deleted."
+        else:
+            try:
+                filepath = self._safe_path(filename)
+            except PermissionError as e:
+                return str(e)
+            if os.path.exists(filepath):
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    return f"The file {filename} has been deleted."
+                elif os.path.isdir(filepath):
+                    os.rmdir(filepath)
+                    return f"The folder {filename} has been deleted."
+                else:
+                    return f"The path {filename} is neither a file nor a folder."
+            else:
+                return f"The file or folder {filename} does not exist."
+
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
+
 class LoadObjectFromPythonFile(Tool):
     name = "load_object_from_python_file"
     description = "Load a class or method from a Python file so it can be used by the agent."
@@ -188,8 +290,10 @@ class LoadObjectFromPythonFile(Tool):
         self.working_dir = working_dir
 
     def forward(self, filename: str, object_name: str) -> Any:
-        file_path = os.path.join(self.working_dir, filename)
-
+        try:
+            file_path = self._safe_path(filename)
+        except PermissionError as e:
+            raise FileNotFoundError(str(e))
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"The file {filename} does not exist.")
 
@@ -207,3 +311,11 @@ class LoadObjectFromPythonFile(Tool):
             raise AttributeError(f"The object {object_name} was not found in {filename}")
 
         return getattr(module, object_name)
+
+    def _safe_path(self, path: str) -> str:
+        # Prevent absolute paths and directory traversal
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path

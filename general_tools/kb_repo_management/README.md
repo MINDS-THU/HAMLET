@@ -179,6 +179,7 @@ kb_repo_management/
 * Any modified file is passed to `repo_indexer.update_file()` to update the semantic search index.
 * Tools are structured for use with LLM agents, but can also be used programmatically.
 
+
 ### Example usage
 ```python
 from general_tools.kb_repo_management.repo_indexer import RepoIndexer
@@ -249,6 +250,7 @@ knowledge_curation_agent = ToolCallingAgent(
 )
 
 ```
+
 
 ---
 

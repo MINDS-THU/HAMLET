@@ -26,7 +26,10 @@ class ListKnowledgeBaseDirectory(Tool):
         self.root = Path(repo_indexer.root)
 
     def forward(self, directory: str) -> str:
-        chosen_dir = self.root / directory
+        try:
+            chosen_dir = self._safe_kb_path(directory)
+        except PermissionError as e:
+            return str(e)
         if not chosen_dir.exists():
             return f"The directory '{directory}' does not exist in the knowledge base."
         if not chosen_dir.is_dir():
@@ -35,7 +38,13 @@ class ListKnowledgeBaseDirectory(Tool):
         if not files:
             return f"The directory '{directory}' is empty."
         return "\n".join(files)
-
+    
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
 
 class SeeKnowledgeBaseFile(Tool):
     name = "see_knowledge_base_file"
@@ -53,7 +62,10 @@ class SeeKnowledgeBaseFile(Tool):
         self.root = Path(repo_indexer.root)
 
     def forward(self, file_path: str) -> str:
-        filepath = self.root / file_path
+        try:
+            filepath = self._safe_kb_path(file_path)
+        except PermissionError as e:
+            return str(e)
         if not filepath.exists():
             return f"The file '{file_path}' does not exist in the knowledge base."
         if not filepath.is_file():
@@ -66,6 +78,12 @@ class SeeKnowledgeBaseFile(Tool):
         formatted_lines = [f"{i+1}: {line}" for i, line in enumerate(lines)]
         return "".join(formatted_lines)
 
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
 
 class MoveOrRenameInKnowledgeBase(Tool):
     name = "move_or_rename_in_knowledge_base"
@@ -94,8 +112,11 @@ class MoveOrRenameInKnowledgeBase(Tool):
         return new_path
 
     def forward(self, source_path: str, destination_path: str, overwrite: bool) -> str:
-        src = self.root / source_path
-        dst = self.root / destination_path
+        try:
+            src = self._safe_kb_path(source_path)
+            dst = self._safe_kb_path(destination_path)
+        except PermissionError as e:
+            return str(e)
 
         if not src.exists():
             return f"Source '{source_path}' does not exist in the knowledge base."
@@ -107,6 +128,12 @@ class MoveOrRenameInKnowledgeBase(Tool):
         shutil.move(str(src), str(dst))
         return f"Moved or renamed '{source_path}' to '{dst.relative_to(self.root)}' in the knowledge base."
 
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
 
 class DeleteFromKnowledgeBase(Tool):
     name = "delete_from_knowledge_base"
@@ -124,7 +151,10 @@ class DeleteFromKnowledgeBase(Tool):
         self.root = Path(repo_indexer.root)
 
     def forward(self, target_path: str) -> str:
-        target = self.root / target_path
+        try:
+            target = self._safe_kb_path(target_path)
+        except PermissionError as e:
+            return str(e)
 
         if not target.exists():
             return f"The path '{target_path}' does not exist in the knowledge base."
@@ -134,3 +164,10 @@ class DeleteFromKnowledgeBase(Tool):
         else:
             shutil.rmtree(target)
         return f"Deleted '{target_path}' from the knowledge base."
+
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path

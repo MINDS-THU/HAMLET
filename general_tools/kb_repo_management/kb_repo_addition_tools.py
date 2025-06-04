@@ -39,8 +39,18 @@ class WriteToKnowledgeBase(Tool):
             counter += 1
         return new_path
 
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
+
     def forward(self, content: str, destination_path: str, overwrite: bool) -> str:
-        dst = self.root / destination_path
+        try:
+            dst = self._safe_kb_path(destination_path)
+        except PermissionError as e:
+            return str(e)
 
         if dst.exists() and not overwrite:
             dst = self._get_unique_path(dst)
@@ -83,9 +93,26 @@ class CopyToKnowledgeBase(Tool):
             counter += 1
         return new_path
 
+    def _safe_working_path(self, path: str) -> Path:
+        abs_root = self.working_dir.resolve()
+        abs_path = (self.working_dir / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
+
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
+
     def forward(self, source_path: str, destination_path: str, overwrite: bool) -> str:
-        src = self.working_dir / source_path
-        dst = self.root / destination_path
+        try:
+            src = self._safe_working_path(source_path)
+            dst = self._safe_kb_path(destination_path)
+        except PermissionError as e:
+            return str(e)
 
         if not src.exists():
             return f"Error: source '{source_path}' does not exist in the working directory."
@@ -154,8 +181,18 @@ class AppendToKnowledgeBaseFile(Tool):
         self.root = Path(repo_indexer.root)
         self.repo_indexer = repo_indexer
 
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
+
     def forward(self, target_file: str, new_content: str, insert_mode: str | None = None, match_string: str | None = None) -> str:
-        filepath = self.root / target_file
+        try:
+            filepath = self._safe_kb_path(target_file)
+        except PermissionError as e:
+            return str(e)
 
         if not filepath.exists():
             return f"Error: file '{target_file}' does not exist in the knowledge base."

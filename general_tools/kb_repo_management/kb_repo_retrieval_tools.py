@@ -62,8 +62,7 @@ class KeywordSearchKnowledgeBase(Tool):
             return "Error: Path escapes the knowledge base directory."
 
         start_time = time.time()
-        target_path = os.path.join(self.knowledge_base_dir, path)
-        if not os.path.exists(target_path):
+        if not target_path.exists():
             return f"The path '{path}' does not exist."
 
         def timed_out():
@@ -155,10 +154,27 @@ class CopyFromKnowledgeBase(Tool):
             counter += 1
         return new_path
 
-    def forward(self, source_path: str, destination_path: str, overwrite: bool) -> str:
-        src = self.root / source_path
-        dst = self.working_dir / destination_path
+    def _safe_kb_path(self, path: str) -> Path:
+        abs_root = self.root.resolve()
+        abs_path = (self.root / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
 
+    def _safe_working_path(self, path: str) -> Path:
+        abs_root = self.working_dir.resolve()
+        abs_path = (self.working_dir / path).resolve()
+        if not str(abs_path).startswith(str(abs_root)):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
+
+    def forward(self, source_path: str, destination_path: str, overwrite: bool) -> str:
+        try:
+            src = self._safe_kb_path(source_path)
+            dst = self._safe_working_path(destination_path)
+        except PermissionError as e:
+            return str(e)
+        
         if not src.exists():
             return f"Error: source path '{source_path}' does not exist in the knowledge base."
 
