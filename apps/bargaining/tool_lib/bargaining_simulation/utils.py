@@ -2,6 +2,108 @@ from copy import deepcopy
 import random
 from datetime import datetime
 
+import numpy as np
+from typing import List, Dict, Any, Optional
+
+
+def sample_private_values_for_dataset(
+    dataset: List[Dict[str, Any]],
+    gain_from_trade: bool = True,
+    random_seed: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Sample the seller's private cost and the buyer's private value for every listing in
+    *dataset* using a deterministic NumPy random matrix.
+
+    A 2‑column matrix ``R`` of independent draws from :math:`\text{Uniform}(0,1)` is
+    produced first:
+
+    * **Shape:** ``(N, 2)`` where ``N = len(dataset)``.
+    * **Seeding:** ``numpy.random.seed(random_seed)`` if *random_seed* is not ``None``.
+    * **Usage:**
+        * ``R[i, 0]`` → seller‑cost draw for listing *i*.
+        * ``R[i, 1]`` → buyer‑value draw for listing *i*.
+
+    The raw draws are then linearly mapped into economically meaningful intervals while
+    preserving the boundaries used in the original implementation.
+
+    **Seller cost (all modes)**
+        ``seller_cost_i = 0.6·low_i  +  R[i,0] · (0.9·low_i  − 0.6·low_i)``
+        ∈ ``[0.6 × lowest_price, 0.9 × lowest_price]``
+
+    **Buyer value**
+        *Gain from trade* ``(gain_from_trade=True)``
+            ``buyer_value_i = (seller_cost_i+0.01) + R[i,1] · (hi_i + 0.1·Δ_i − (seller_cost_i+0.01))``
+            where ``hi_i = highest_price`` and ``Δ_i = hi_i − low_i``.
+            Range: ``[seller_cost+0.01, highest_price + 0.1·(highest_price − lowest_price)]``.  
+            This ensures buyers are willing to pay at least 1 ¢ more than the seller’s cost.
+
+        *No gain from trade* ``(gain_from_trade=False)``
+            ``buyer_value_i = 0.4·low_i  + R[i,1] · ((seller_cost_i−0.01) − 0.4·low_i)``
+            Range: ``[0.4 × lowest_price, seller_cost − 0.01]``.  
+            This enforces an efficiency loss by making the buyer’s valuation below the
+            seller’s cost.
+
+    The function **mutates** each product dictionary by adding two rounded entries:
+
+    * ``'seller_private_cost'`` — float with 2‑decimal precision.
+    * ``'buyer_private_value'`` — float with 2‑decimal precision.
+
+    Parameters
+    ----------
+    dataset : list[dict]
+        Each product must hold
+        ``product['lowest_price_info']['lowest_price']`` and
+        ``product['highest_price_info']['highest_price']``.
+    gain_from_trade : bool, default=True
+        Toggle between *gain* and *no‑gain* regimes described above.
+    random_seed : int | None, default=None
+        Random seed for full reproducibility; skipped when ``None``.
+
+    Returns
+    -------
+    list[dict]
+        The same list with the additional keys per listing.
+    """
+
+    # ── RNG initialisation ──────────────────────────────────────────────────────
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    n = len(dataset)
+    random_draws = np.random.rand(n, 2)  # column‑0: seller, column‑1: buyer
+    # print(random_draws)
+    # ── Sampling loop ───────────────────────────────────────────────────────────
+    for i, product in enumerate(dataset):
+        low_price = product["lowest_price_info"]["lowest_price"]
+        high_price = product["highest_price_info"]["highest_price"]
+
+        # Seller cost mapping
+        seller_min = 0.6 * low_price
+        seller_max = 0.9 * low_price
+        seller_cost = seller_min + random_draws[i, 0] * (seller_max - seller_min)
+
+        # Buyer value mapping
+        if gain_from_trade:
+            buyer_min = seller_cost + 0.01
+            buyer_max = high_price + 0.1 * (high_price - low_price)
+        else:
+            buyer_min = 0.4 * low_price
+            buyer_max = seller_cost - 0.01
+
+        # Guard against numerical issues where max == min
+        if buyer_max <= buyer_min:
+            buyer_max = buyer_min + 0.01
+
+        buyer_value = buyer_min + random_draws[i, 1] * (buyer_max - buyer_min)
+
+        # Attach rounded results back to product
+        product["seller_bottomline_price"] = round(seller_cost, 2)
+        product["buyer_bottomline_price"] = round(buyer_value, 2)
+
+    return dataset
+
+
 def get_current_timestamp():
     now = datetime.now()
     return now.strftime("%Y%m%d_%H%M%S")
@@ -83,24 +185,9 @@ def sample_unique_items(lst, sample_size):
     # random.seed(40)
     return random.sample(lst, sample_size)
 
-def negotiation_sanity_checks(negotiation_data):
+def negotiation_sanity_checks(events, deal, deal_price=None):
     """
     Compute sanity checks on negotiation behavior between buyer and seller.
-
-    negotiation_data is a dict like:
-    {
-        "listing_price": float,
-        "buyer_value": float,
-        "seller_cost": float,
-        "event_list": [
-           {"buyer": [80]},
-           {"seller": ["reject", 82]},
-           {"buyer": [81]},
-           {"seller": ["accept"]}
-        ],
-        "deal": bool,
-        "deal_price": float or None
-    }
 
     Returns:
       (buyer_checks, seller_checks) where each is a dict:
@@ -109,10 +196,6 @@ def negotiation_sanity_checks(negotiation_data):
           'proposed_worse_offer_than_rejected': bool
         }
     """
-
-    events = negotiation_data['event_list']
-    deal = negotiation_data['deal']
-    deal_price = negotiation_data.get('deal_price', None)
 
     buyer_checks = {
         'accepted_worse_offer_later': False,
