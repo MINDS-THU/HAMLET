@@ -38,7 +38,7 @@ from openinference.instrumentation import using_session
 from smolagents import LiteLLMModel, InferenceClientModel, LogLevel, TransformersModel
 from src.base_agent import CodeAgent
 from apps.bargaining.tool_lib.bargaining_simulation.bargaining_simulation_tools import EventManager, make_offer, respond_to_offer, send_message, wait_for_response, wait_for_time_period, quit_negotiation, SearchPrice
-from apps.bargaining.tool_lib.bargaining_simulation.utils import negotiation_sanity_checks, eventbatch2text, get_current_timestamp, swtich_role
+from apps.bargaining.tool_lib.bargaining_simulation.utils import negotiation_sanity_checks, eventbatch2text, get_current_timestamp, swtich_role, sample_private_values_for_dataset
 
 def start_negotiating(agents):
     """
@@ -117,15 +117,12 @@ def process_outcome(listing, event_list, deal, deal_price):
     }
 
 def build_model(model_name):
-    if "gpt" in model_name or "o3" in model_name:
-        # "gpt-4o"
+    if "gpt" in model_name or "claude" in model_name or "gemini" in model_name:
         return LiteLLMModel(model_id=model_name)
-    elif "Qwen" in model_name:
-        # "Qwen/Qwen3-32B"
-        # "Qwen/Qwen3-30B-A3B"
+    elif "Qwen" in model_name or "gemma" in model_name or "Mistral" in model_name:
         return InferenceClientModel(
             model_id=model_name,
-            # provider="nebius",
+            provider="nebius",
             # provider="novita",
             )
     else:
@@ -136,6 +133,8 @@ if __name__ == "__main__":
     parser.add_argument("--buyer_model", type=str, default="gpt-4.1", help="The model to use for the buyer agent.")
     parser.add_argument("--seller_model", type=str, default="gpt-4.1", help="The model to use for the seller agent.")
     parser.add_argument("--data_split", type=str, default="validation", help="The data split to use for the experiment. Options are 'training', 'validation', 'testing'.")
+    parser.add_argument("--gain_from_trade", type=bool, default=True, help="Whether to sample private values with gain from trade.")
+    parser.add_argument("--random_seed", type=int, default=30, help="Random seed for sampling private values.")
     args = parser.parse_args()
 
     cur_date_time = get_current_timestamp()
@@ -145,11 +144,13 @@ if __name__ == "__main__":
     # load dataset
     try:
         # Load the processed data from the JSON file
-        with open(f"./apps/bargaining/sim_datasets/{args.data_spplit}_data.json", "r") as f:
+        with open(f"./apps/bargaining/sim_datasets/{args.data_split}_data.json", "r") as f:
             processed_data = json.load(f)
     except FileNotFoundError:
-        print(f"./apps/bargaining/sim_datasets/{args.data_spplit}_data.json")
+        print(f"./apps/bargaining/sim_datasets/{args.data_split}_data.json")
         exit(1)
+
+    updated_processed_data = sample_private_values_for_dataset(processed_data, gain_from_trade=args.gain_from_trade, random_seed=args.random_seed)
 
     output_dir = "./apps/bargaining/results/"
     os.makedirs(output_dir, exist_ok=True)  # Ensure the output directory exists
@@ -159,9 +160,10 @@ if __name__ == "__main__":
     results = []
 
     # iterate through the dataset
-    for data_idx, listing in enumerate(processed_data):
+    for data_idx, listing in enumerate(updated_processed_data):
         print("==== Data Split: {}, Listing No: {} ====".format(args.data_split, data_idx))
         session_id = f"{cur_date_time}_{args.buyer_model}_{args.seller_model}_{args.data_split}_{data_idx}"
+        listing["max_round"] = 10
         # reset event manager for each experiment
         EventManager.reset()
         with using_session(session_id=session_id):
