@@ -104,7 +104,7 @@ Then open the launched Gradio interface in your browser and start interacting wi
 
 After completion, check the `--save-dir` folder for your literature survey files.
 
-[View Example Final Report (PDF)](./example_report_1/final_report_fixed.pdf)
+[View Example Final Report (PDF)](./reports/example_report_1/final_report_fixed.pdf)
 
 <a href="./example_report/final_report_fixed.pdf" class="image fit"><img src="./resource/literature_survey_report_figure.png" alt="Example Literature Survey Report"></a>
 
