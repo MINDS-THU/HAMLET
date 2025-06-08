@@ -1,47 +1,82 @@
 #!/bin/bash
+#SBATCH --job-name=bargaining_exp
+#SBATCH --output=/gpfs/radev/project/zhuoran_yang/cl2637/exp/joboutput/%x_%j.out
+#SBATCH --error=/gpfs/radev/project/zhuoran_yang/cl2637/exp/joboutput/%x_%j.err
+#SBATCH --partition=day         
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=10:00:00          # 10 hours
 
-# Define the list of models
-models=("gpt-4.1" "claude-sonnet-4-20250514" "gemini-2.5-pro" "Qwen/Qwen3-32B" "google/gemma-3-27b-it" "mistralai/Mistral-Small-3.1-24B-Instruct-2503")
+module load miniconda
 
-# Define the data splits to evaluate
+# initialise Conda for non‑interactive shell and activate env
+source activate base
+conda activate py310
+
+# go to project root so relative paths work
+cd /gpfs/radev/project/zhuoran_yang/cl2637/exp/COOPA
+
+# --------------------------- configuration ----------------------------------
+models=(
+  "gpt-4.1"
+  "Qwen/Qwen3-32B"
+  "google/gemma-3-27b-it"
+  "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+)
+
+skip_pairs=(
+  "gpt-4.1::gpt-4.1"
+  "google/gemma-3-27b-it::google/gemma-3-27b-it"
+  "gpt-4.1::Qwen/Qwen3-32B"
+  "Qwen/Qwen3-32B::Qwen/Qwen3-32B"
+  # removed dangling entry "Qwen/Qwen3-32B::"
+  "gpt-4.1::google/gemma-3-27b-it"
+)
+
 data_splits=("validation")
-
-# Define the random seed for reproducibility
 random_seed=30
+gain_from_trade="True"           # literal True / False
+num_workers=8
 
-# Define whether to use gain from trade
-gain_from_trade=true
-
-# Create a directory for logs
 log_dir="./logs"
 mkdir -p "$log_dir"
 
-# Create a temporary file to store commands
-commands_file="./commands.txt"
-rm -f "$commands_file"
+sanitize() { printf '%s' "$1" | tr '/:' '_' ; }
 
-# Generate commands for all combinations of buyer and seller models
+skip_pair() {
+  local candidate="$1"
+  for p in "${skip_pairs[@]}"; do [[ "$p" == "$candidate" ]] && return 0 ; done
+  return 1
+}
+
+# --------------------------- experiment loop --------------------------------
 for buyer_model in "${models[@]}"; do
-    for seller_model in "${models[@]}"; do
-        for data_split in "${data_splits[@]}"; do
-            echo "python ./apps/bargaining/run.py \
-                --buyer_model \"$buyer_model\" \
-                --seller_model \"$seller_model\" \
-                --data_split \"$data_split\" \
-                --gain_from_trade \"$gain_from_trade\" \
-                --random_seed \"$random_seed\" \
-                > \"$log_dir/${buyer_model}_${seller_model}_${data_split}.log\" 2>&1" >> "$commands_file"
-        done
+  for seller_model in "${models[@]}"; do
+    for data_split in "${data_splits[@]}"; do
+      echo "▶︎  Buyer=$buyer_model | Seller=$seller_model | Split=$data_split"
+
+      key="${buyer_model}::${seller_model}"
+      if skip_pair "$key"; then
+        echo "⏩  Skipping $key (already completed)"
+        continue
+      fi
+
+      log_file="$log_dir/$(sanitize "$buyer_model")_$(sanitize "$seller_model")_${data_split}.log"
+
+      cmd=(python -m apps.bargaining.run
+           --buyer_model "$buyer_model"
+           --seller_model "$seller_model"
+           --data_split   "$data_split"
+           --random_seed  "$random_seed"
+           --num_workers  "$num_workers"
+           --gain_from_trade "$gain_from_trade")
+
+      # use srun if your site enforces it; otherwise plain exec is fine
+      "${cmd[@]}" > "$log_file" 2>&1
+
+      echo "✓  Finished (log: $log_file)"
     done
+  done
 done
 
-# Prompt the user for the number of parallel processes
-read -p "Enter the number of parallel processes: " num_parallel
-
-# Run the commands in parallel
-parallel -j "$num_parallel" < "$commands_file"
-
-# Clean up the temporary file
-rm -f "$commands_file"
-
-echo "All experiments completed!"
+echo "🏁  All experiments completed!"
