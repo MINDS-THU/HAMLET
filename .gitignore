@@ -3,4 +3,5 @@
 **/logs/
 **/results/
 **/temp_files/
+**/downloads/
 /.gradio/

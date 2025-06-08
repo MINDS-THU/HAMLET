@@ -173,11 +173,11 @@ if __name__ == "__main__":
     Path(base_temp_dir).mkdir(parents=True, exist_ok=True)
 
     if args.working_directory is None:
-        args.working_directory = tempfile.mkdtemp(dir="apps/operations_research/temp_files", prefix="working_directory_")
+        args.working_directory = tempfile.mkdtemp(dir=base_temp_dir, prefix="working_directory_")
     if args.knowledge_base_directory is None:
-        args.knowledge_base_directory = tempfile.mkdtemp(dir="apps/operations_research/temp_files", prefix="knowledge_base_")
+        args.knowledge_base_directory = tempfile.mkdtemp(dir=base_temp_dir, prefix="knowledge_base_")
     if args.index_dir is None:
-        args.index_dir = tempfile.mkdtemp(dir="apps/operations_research/temp_files", prefix="index_dir_")
+        args.index_dir = tempfile.mkdtemp(dir=base_temp_dir, prefix="index_dir_")
     
     # Create the agent
     manager_agent = create_manager_agent(

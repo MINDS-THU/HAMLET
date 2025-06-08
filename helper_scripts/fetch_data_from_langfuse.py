@@ -6,6 +6,9 @@ import time
 from collections import defaultdict
 from langfuse.api.core.api_error import ApiError
 
+# This script fetches data from Langfuse and processes it to create a dataset for fine-tuning.
+# You have to set up your Langfuse account, create a project, and instrument your application to save the data.
+
 # Robust API wrapper
 def robust_api_call(func, *args, sleep_between_calls=True, **kwargs):
     max_retries = 5
@@ -147,8 +150,8 @@ if __name__ == "__main__":
     # each <agent_name>.json file will contain the conversation history for that agent in the session.
 
     langfuse = Langfuse(
-        secret_key="",
-        public_key="",
+        secret_key="<your_secret_key>",
+        public_key="<your_public_key>", 
         host="https://cloud.langfuse.com",
     )
 
