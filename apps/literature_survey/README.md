@@ -20,15 +20,15 @@ This agent automates the process of generating a technical literature survey usi
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/cyrilli/COOPA_v3.git
-cd COOPA_v3
+git clone https://github.com/cyrilli/COOPA.git
+cd COOPA
 ```
 
 ### 2. Install Dependencies
 
 - **XeTeX** (for PDF compilation): [texlive](https://www.tug.org/texlive/)
 - **Python packages**:
-From root of `COOPA_v3`, execute
+From root of `COOPA`, execute
 ```bash
 pip install -r requirements.txt
 ```
@@ -43,7 +43,7 @@ The agent uses external services for web search and language models. Register an
 
 ### 4. Configure Environment Variables
 
-Create a `.env` file in the root of `COOPA_v3` and add your API keys:
+Create a `.env` file in the root of `COOPA` and add your API keys:
 
 ```
 SERPER_API_KEY=your_serper_api_key
@@ -56,7 +56,7 @@ JINA_API_KEY=your_jina_api_key
 
 ## Running the Literature Survey Agent
 
-From the root of `COOPA_v3`, run:
+From the root of `COOPA`, run:
 
 ```bash
 python -m apps.literature_survey.run.py --model-id <your-model-id> --save-dir <output-directory>
@@ -92,7 +92,7 @@ This share link expires in 72 hours. For free permanent hosting and GPU upgrades
 
 ## Example
 
-Execute the following command from the root folder of COOPA_v3:
+Execute the following command from the root folder of COOPA:
 
 ```bash
 python -m apps.literature_survey.run.py --model-id gpt-4.1 --save-dir example_report

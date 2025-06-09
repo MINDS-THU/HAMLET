@@ -1,1 +1,0 @@
-This folder contains implementation of different apps.
