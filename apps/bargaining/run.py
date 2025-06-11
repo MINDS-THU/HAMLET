@@ -15,6 +15,15 @@ from threading import Lock   # NEW ← add near other imports at top
 from dotenv import load_dotenv
 load_dotenv('./.env')
 
+import sys
+import io
+import contextlib
+
+# Force UTF-8 output on Windows
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 # -----------------------------------------------------------------------------
 # OpenTelemetry / Langfuse instrumentation (runs in every process)
 # -----------------------------------------------------------------------------
@@ -259,15 +268,19 @@ def _run_single_listing(
 # -----------------------------------------------------------------------------
 #                                  CLI
 # -----------------------------------------------------------------------------
+def str2bool(v):
+    return v.lower() in ("true", "1", "yes", "y")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--buyer_model",  type=str, default="gpt-4.1")
     parser.add_argument("--seller_model", type=str, default="gpt-4.1")
     parser.add_argument("--data_split",   type=str, default="validation")
-    parser.add_argument("--gain_from_trade", type=bool, default=False)
+    parser.add_argument("--gain_from_trade", type=str2bool, default=False)
     parser.add_argument("--random_seed",  type=int, default=30)
     parser.add_argument("--num_workers",  type=int, default=8)
+    parser.add_argument("--log_dir", type=str, default="logs")
+
     args = parser.parse_args()
 
     # ---------------------------------------------------------------------
@@ -275,13 +288,19 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------
     cur_date_time = get_current_timestamp()
 
+    log_subdir = (
+        Path(args.log_dir) /
+        f"{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{'gft' if args.gain_from_trade else 'ngft'}"
+    )
+    log_subdir.mkdir(parents=True, exist_ok=True)
+
     dataset_path = Path(f"./apps/bargaining/sim_datasets/{args.data_split}_data.json")
     if not dataset_path.is_file():
         raise FileNotFoundError(dataset_path)
 
     with open(dataset_path, "r", encoding="utf-8") as f:
         processed_data = json.load(f)
-    processed_data = processed_data[:100]
+    processed_data = processed_data
     updated_processed_data = sample_private_values_for_dataset(
         processed_data,
         gain_from_trade=args.gain_from_trade,
@@ -303,11 +322,19 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # one‑result‑per‑line JSONL for crash‑safe saving
+    gft_flag = "gft" if args.gain_from_trade else "ngft"
+
     output_file = output_dir / (
         f"{cur_date_time}_{_sanitize(args.buyer_model)}_"
-        f"{_sanitize(args.seller_model)}_{args.data_split}_results.jsonl"
+        f"{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}_results.jsonl"
     )
     output_file.unlink(missing_ok=True)  # start fresh
+    failed_output_file = output_dir / (
+        f"{cur_date_time}_{_sanitize(args.buyer_model)}_"
+        f"{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}_failures.jsonl"
+    )
+    failed_output_file.unlink(missing_ok=True)  # start fresh
+
     save_lock = Lock()
 
     def _save_result(record: dict) -> None:
@@ -325,7 +352,20 @@ if __name__ == "__main__":
     print(f"Running {len(tasks)} listings with {args.num_workers} workers…\n")
 
     with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-        future_to_idx = {executor.submit(_run_single_listing, *t): t[0] for t in tasks}
+        # future_to_idx = {executor.submit(_run_single_listing, *t): t[0] for t in tasks}
+        def run_and_log(idx, *args_for_listing):
+            log_path = log_subdir / f"listing_{idx:03}.log"
+            with open(log_path, "w", encoding="utf-8") as log_fp, \
+                open(log_path, "a", encoding="utf-8") as err_fp, \
+                contextlib.redirect_stdout(log_fp), \
+                contextlib.redirect_stderr(err_fp):
+                return _run_single_listing(idx, *args_for_listing)
+
+        future_to_idx = {
+            executor.submit(run_and_log, idx, *t[1:]): idx
+            for idx, t in enumerate(tasks)
+        }
+
 
         for future in tqdm(
             as_completed(future_to_idx),
@@ -337,8 +377,23 @@ if __name__ == "__main__":
                 record = future.result()   # one listing’s result
                 results.append(record)     # (optional) keep aggregate
                 _save_result(record)       # ← immediate, crash‑safe write
+            # except Exception as exc:
+            #     print(f"[Listing {idx}] failed with: {exc}")
+
             except Exception as exc:
                 print(f"[Listing {idx}] failed with: {exc}")
+                fail_record = {
+                    "session_id": f"{cur_date_time}_{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{idx}",
+                    "error": str(exc),
+                    "listing_index": idx,
+                    "listing_data": tasks[idx][1],  # the original listing dict
+                }
+                with save_lock:
+                    with open(failed_output_file, "a", encoding="utf-8") as fp:
+                        json.dump(fail_record, fp)
+                        fp.write("\n")
+                        fp.flush()
+
 
     # ---------------------------------------------------------------------
     # Optional: also write full aggregated list (old behaviour)
