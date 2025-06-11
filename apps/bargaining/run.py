@@ -271,6 +271,17 @@ def _run_single_listing(
 def str2bool(v):
     return v.lower() in ("true", "1", "yes", "y")
 
+def run_and_log(idx, listing, buyer_model, seller_model, data_split, cur_date_time, log_dir):
+    from pathlib import Path
+    import contextlib
+
+    log_path = Path(log_dir) / f"listing_{idx:03}.log"
+    with open(log_path, "w", encoding="utf-8") as log_fp, \
+         contextlib.redirect_stdout(log_fp), \
+         contextlib.redirect_stderr(log_fp):
+        return _run_single_listing(idx, listing, buyer_model, seller_model, data_split, cur_date_time)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--buyer_model",  type=str, default="gpt-4.1")
@@ -288,11 +299,15 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------
     cur_date_time = get_current_timestamp()
 
-    log_subdir = (
-        Path(args.log_dir) /
-        f"{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{'gft' if args.gain_from_trade else 'ngft'}"
+    gft_flag = "gft" if args.gain_from_trade else "ngft"
+    log_subdir = Path(args.log_dir) / (
+        f"{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}"
     )
     log_subdir.mkdir(parents=True, exist_ok=True)
+
+    # Clean up any existing logs from previous run
+    for f in log_subdir.glob("listing_*.log"):
+        f.unlink()
 
     dataset_path = Path(f"./apps/bargaining/sim_datasets/{args.data_split}_data.json")
     if not dataset_path.is_file():
@@ -300,7 +315,7 @@ if __name__ == "__main__":
 
     with open(dataset_path, "r", encoding="utf-8") as f:
         processed_data = json.load(f)
-    processed_data = processed_data
+
     updated_processed_data = sample_private_values_for_dataset(
         processed_data,
         gain_from_trade=args.gain_from_trade,
@@ -353,19 +368,11 @@ if __name__ == "__main__":
 
     with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
         # future_to_idx = {executor.submit(_run_single_listing, *t): t[0] for t in tasks}
-        def run_and_log(idx, *args_for_listing):
-            log_path = log_subdir / f"listing_{idx:03}.log"
-            with open(log_path, "w", encoding="utf-8") as log_fp, \
-                open(log_path, "a", encoding="utf-8") as err_fp, \
-                contextlib.redirect_stdout(log_fp), \
-                contextlib.redirect_stderr(err_fp):
-                return _run_single_listing(idx, *args_for_listing)
 
         future_to_idx = {
-            executor.submit(run_and_log, idx, *t[1:]): idx
-            for idx, t in enumerate(tasks)
+            executor.submit(run_and_log, idx, listing, args.buyer_model, args.seller_model, args.data_split, cur_date_time, log_subdir): idx
+            for idx, listing in enumerate(updated_processed_data)
         }
-
 
         for future in tqdm(
             as_completed(future_to_idx),
