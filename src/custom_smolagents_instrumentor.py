@@ -1,6 +1,7 @@
 from typing import Callable, Any, Tuple, Mapping, Optional
 from wrapt import wrap_function_wrapper
 from opentelemetry import trace as trace_api, context as context_api
+from opentelemetry.context import Context
 from openinference.instrumentation import OITracer, TraceConfig, get_attributes_from_context
 from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 from openinference.instrumentation.smolagents._wrappers import (
@@ -44,6 +45,7 @@ class CustomRunWrapper:
 
         with self._tracer.start_as_current_span(
             span_name,
+            context=Context(),
             attributes={
                 "openinference.agent.name": agent_name,
                 SpanAttributes.OPENINFERENCE_SPAN_KIND: AGENT,
@@ -77,6 +79,7 @@ class CustomToolCallWrapper:
         span_name = f"{instance.__class__.__name__}"
         with self._tracer.start_as_current_span(
             span_name,
+            context=Context(),
             attributes={
                 "openinference.tool.name": tool_name,
                 SpanAttributes.OPENINFERENCE_SPAN_KIND: TOOL,
@@ -98,6 +101,8 @@ class CustomToolCallWrapper:
 
 
 class CustomSmolagentsInstrumentor:
+    _already_instrumented = False
+
     def __init__(self) -> None:
         self._original_run_method = None
         self._original_step_methods = None
@@ -145,6 +150,10 @@ class CustomSmolagentsInstrumentor:
     #     wrap_function_wrapper("smolagents", "Tool.__call__", tool_wrapper)
 
     def instrument(self, tracer_provider=None, config: Optional[TraceConfig] = None) -> None:
+        if CustomSmolagentsInstrumentor._already_instrumented:
+            return
+        CustomSmolagentsInstrumentor._already_instrumented = True
+
         if tracer_provider is None:
             tracer_provider = trace_api.get_tracer_provider()
         if config is None:
@@ -163,9 +172,10 @@ class CustomSmolagentsInstrumentor:
         ### Very important to add the modules here, otherwise the traces will not be grouped together
         instrumented_modules = ["smolagents", "src.base_agent"]
 
-        # === Instrument run() on MultiStepAgent ===
+        # === Instrument run() on CodeAgent and ToolCallingAgent ===
         for mod in instrumented_modules:
-            wrap_function_wrapper(mod, "MultiStepAgent.run", run_wrapper)
+            for cls_name in ["ToolCallingAgent", "CodeAgent"]:  # <-- add CodeAgent
+                wrap_function_wrapper(mod, f"{cls_name}.run", run_wrapper)
 
         # === Instrument step() on CodeAgent and ToolCallingAgent ===
         for mod in instrumented_modules:

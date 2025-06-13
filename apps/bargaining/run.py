@@ -8,9 +8,8 @@ import os
 import base64
 import argparse
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from threading import Lock   # NEW ← add near other imports at top
-
+from concurrent.futures import ProcessPoolExecutor, as_completed, CancelledError, TimeoutError
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv('./.env')
@@ -18,6 +17,34 @@ load_dotenv('./.env')
 import sys
 import io
 import contextlib
+
+from itertools import product   # NEW – keep with other imports
+
+MODELS = [
+    "google/gemma-3-27b-it",
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    "Qwen/Qwen3-32B",
+    "gpt-4.1",
+    "o3",
+]
+
+SKIP_PAIRS = {
+    "google/gemma-3-27b-it::google/gemma-3-27b-it",
+    "google/gemma-3-27b-it::mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    "google/gemma-3-27b-it::Qwen/Qwen3-32B",
+    "google/gemma-3-27b-it::gpt-4.1",
+    "google/gemma-3-27b-it::o3",
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503::google/gemma-3-27b-it", 
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503::mistralai/Mistral-Small-3.1-24B-Instruct-2503", 
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503::Qwen/Qwen3-32B", 
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503::gpt-4.1",
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503::o3",
+    "Qwen/Qwen3-32B::google/gemma-3-27b-it",
+    "Qwen/Qwen3-32B::mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    "Qwen/Qwen3-32B::Qwen/Qwen3-32B",
+    "Qwen/Qwen3-32B::gpt-4.1",
+    # …etc – copy the rest of your original list …
+}
 
 # Force UTF-8 output on Windows
 if sys.platform == "win32":
@@ -156,7 +183,7 @@ def process_outcome(listing, event_list, deal, deal_price):
 
 
 def build_model(model_name):
-    if any(x in model_name for x in ["gpt", "claude", "gemini"]):
+    if any(x in model_name for x in ["gpt", "o3", "claude", "gemini"]):
         return LiteLLMModel(model_id=model_name)
     elif any(x in model_name for x in ["Qwen", "gemma", "Mistral"]):
         return InferenceClientModel(model_id=model_name, provider="nebius")
@@ -281,126 +308,217 @@ def run_and_log(idx, listing, buyer_model, seller_model, data_split, cur_date_ti
          contextlib.redirect_stderr(log_fp):
         return _run_single_listing(idx, listing, buyer_model, seller_model, data_split, cur_date_time)
 
-
+# --------------------------------------------------------------------------- #
+#  Main entry‐point : single executor over *all* buyer × seller pairs         #
+# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--buyer_model",  type=str, default="gpt-4.1")
-    parser.add_argument("--seller_model", type=str, default="gpt-4.1")
-    parser.add_argument("--data_split",   type=str, default="validation")
-    parser.add_argument("--gain_from_trade", type=str2bool, default=False)
-    parser.add_argument("--random_seed",  type=int, default=30)
-    parser.add_argument("--num_workers",  type=int, default=8)
+    parser.add_argument("--data_split", type=str, default="validation")
+    parser.add_argument("--mode",
+                        type=str,
+                        default="uniform",
+                        choices=["uniform",
+                                 "force_gain_from_trade",
+                                 "force_no_gain_from_trade"])
+    parser.add_argument("--random_seed", type=int, default=30)
+    parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--log_dir", type=str, default="logs")
-
+    parser.add_argument("--model_filter", nargs="*", default=None,
+                        help="Run only models whose ID contains any of these substrings "
+                             "(e.g. --model_filter gpt Qwen)")          # NEW
     args = parser.parse_args()
 
     # ---------------------------------------------------------------------
-    # Timestamp and dataset
+    # Timestamp + output locations
     # ---------------------------------------------------------------------
     cur_date_time = get_current_timestamp()
-
-    gft_flag = "gft" if args.gain_from_trade else "ngft"
-    log_subdir = Path(args.log_dir) / (
-        f"{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}"
-    )
+    log_subdir    = Path(args.log_dir)
     log_subdir.mkdir(parents=True, exist_ok=True)
 
-    # Clean up any existing logs from previous run
     for f in log_subdir.glob("listing_*.log"):
-        f.unlink()
+        f.unlink()                                                  # fresh logs
 
+    # ---------------------------------------------------------------------
+    # Load / sample dataset *once* (pair-specific resampling happens later)
+    # ---------------------------------------------------------------------
     dataset_path = Path(f"./apps/bargaining/sim_datasets/{args.data_split}_data.json")
     if not dataset_path.is_file():
         raise FileNotFoundError(dataset_path)
 
-    with open(dataset_path, "r", encoding="utf-8") as f:
-        processed_data = json.load(f)
-
-    updated_processed_data = sample_private_values_for_dataset(
-        processed_data,
-        gain_from_trade=args.gain_from_trade,
-        random_seed=args.random_seed,
-    )
+    processed_data = json.loads(dataset_path.read_text(encoding="utf-8"))
 
     # ---------------------------------------------------------------------
-    # Build task list
+    # Build tasks  (every listing for every buyer × seller, optional filter)
     # ---------------------------------------------------------------------
-    tasks = [
-        (idx, listing, args.buyer_model, args.seller_model, args.data_split, cur_date_time)
-        for idx, listing in enumerate(updated_processed_data)
-    ]
+    selected_models = [m for m in MODELS
+                       if not args.model_filter
+                       or any(term in m for term in args.model_filter)]
+
+    # tasks = []
+    # idx_global = 0
+    # for buyer, seller in product(selected_models, selected_models):
+    #     pair_id = f"{buyer}::{seller}"
+    #     if pair_id in SKIP_PAIRS:
+    #         continue
+
+    #     # per-pair log directory (keeps old layout)
+    #     pair_log_dir = (Path(args.log_dir)
+    #                     / f"{_sanitize(buyer)}_{_sanitize(seller)}_"
+    #                       f"{args.data_split}_{cur_date_time}")
+    #     pair_log_dir.mkdir(parents=True, exist_ok=True)
+
+    #     pair_data = sample_private_values_for_dataset(
+    #         processed_data,
+    #         random_seed=args.random_seed,
+    #         mode=args.mode,
+    #     )
+    #     for listing in pair_data:
+    #         tasks.append(
+    #             (idx_global, listing, buyer, seller,
+    #              args.data_split, cur_date_time, pair_log_dir)  # ← NEW ARG
+    #         )
+    #         idx_global += 1
+
+    tasks = []
+    for buyer, seller in product(selected_models, selected_models):
+        pair_id = f"{buyer}::{seller}"
+        if pair_id in SKIP_PAIRS:
+            continue
+
+        pair_log_dir = (Path(args.log_dir)
+                        / f"{_sanitize(buyer)}_{_sanitize(seller)}_"
+                        f"{args.data_split}_{cur_date_time}")
+        pair_log_dir.mkdir(parents=True, exist_ok=True)
+
+        pair_data = sample_private_values_for_dataset(
+            processed_data,
+            random_seed=args.random_seed,
+            mode=args.mode,
+        )
+
+        # 🔽 enumerate to get 0-based index **per pair**
+        for idx_pair, listing in enumerate(pair_data):
+            tasks.append(
+                (idx_pair, listing, buyer, seller,
+                args.data_split, cur_date_time, pair_log_dir)
+            )
+
+
+    n_pairs = len(tasks) // len(processed_data)
+    print(f"Submitting {len(tasks):,} listings across {n_pairs:,} model pairs.")
 
     # ---------------------------------------------------------------------
-    # Prepare **incremental** output file + thread‑safe writer
+    # Crash-safe JSONL outputs
     # ---------------------------------------------------------------------
-    output_dir = Path("./apps/bargaining/results")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path("./apps/bargaining/results"); output_dir.mkdir(exist_ok=True)
 
-    # one‑result‑per‑line JSONL for crash‑safe saving
-    gft_flag = "gft" if args.gain_from_trade else "ngft"
+    # ---------------------------------------------------------------------
+    # Per-pair result / failure files  ➜  same layout as the old runs
+    # ---------------------------------------------------------------------
+    pair_files    = {}          # (buyer, seller) -> Path to *_results.jsonl
+    pair_failures = {}          # (buyer, seller) -> Path to *_failures.jsonl
+    pair_locks    = {}          # one Lock per pair
 
-    output_file = output_dir / (
-        f"{cur_date_time}_{_sanitize(args.buyer_model)}_"
-        f"{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}_results.jsonl"
-    )
-    output_file.unlink(missing_ok=True)  # start fresh
-    failed_output_file = output_dir / (
-        f"{cur_date_time}_{_sanitize(args.buyer_model)}_"
-        f"{_sanitize(args.seller_model)}_{args.data_split}_{gft_flag}_failures.jsonl"
-    )
-    failed_output_file.unlink(missing_ok=True)  # start fresh
+    def _get_paths(buyer: str, seller: str):
+        """Return (results_path, failures_path, lock) for this pair."""
+        key = (buyer, seller)
+        if key not in pair_files:
+            fname_base = (f"{cur_date_time}_{_sanitize(buyer)}_"
+                        f"{_sanitize(seller)}_{args.data_split}")
+            pair_files[key]    = output_dir / f"{fname_base}_results.jsonl"
+            pair_failures[key] = output_dir / f"{fname_base}_failures.jsonl"
+
+            # start each run fresh
+            pair_files[key].unlink(missing_ok=True)
+            pair_failures[key].unlink(missing_ok=True)
+
+            pair_locks[key] = Lock()
+        return pair_files[key], pair_failures[key], pair_locks[key]
+
+    def _save_result(record: dict, buyer: str, seller: str) -> None:
+        """Thread-safe append to the correct <buyer>_<seller> results file."""
+        res_path, _, lock = _get_paths(buyer, seller)
+        with lock, open(res_path, "a", encoding="utf-8") as fp:
+            json.dump(record, fp)
+            fp.write("\n")
+            fp.flush()
+
+    output_file        = output_dir / f"{cur_date_time}_ALLPAIRS_results.jsonl"
+    failed_output_file = output_dir / f"{cur_date_time}_ALLPAIRS_failures.jsonl"
+    output_file.unlink(missing_ok=True); failed_output_file.unlink(missing_ok=True)
 
     save_lock = Lock()
 
-    def _save_result(record: dict) -> None:
-        """Append one completed listing outcome (thread‑safe)."""
-        with save_lock:
-            with open(output_file, "a", encoding="utf-8") as fp:
-                json.dump(record, fp)
-                fp.write("\n")   # JSONL = one JSON per line
-                fp.flush()
-
     # ---------------------------------------------------------------------
-    # Run listings in parallel
+    # Run tasks in parallel – single ProcessPoolExecutor
     # ---------------------------------------------------------------------
-    results = []    # keep in RAM if you still want the full list
-    print(f"Running {len(tasks)} listings with {args.num_workers} workers…\n")
+    FUTURE_TIMEOUT = 360         # seconds per listing
+    results = []
+    print(f"Running {len(tasks):,} listings with {args.num_workers} workers …\n")
 
-    with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-        # future_to_idx = {executor.submit(_run_single_listing, *t): t[0] for t in tasks}
+    executor = None
+    try:
+        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+            future_to_info = {
+                executor.submit(
+                    run_and_log,
+                    idx, listing, buyer, seller,
+                    args.data_split, cur_date_time, pair_log_dir  # ← pass it
+                ): (idx, buyer, seller)
+                for idx, listing, buyer, seller, _, _, pair_log_dir in tasks   # ← unpack
+            }
+            for future in tqdm(as_completed(future_to_info),
+                               total=len(future_to_info),
+                               desc=f"Processing {args.data_split} data"):
+                idx, buyer, seller = future_to_info[future]
+                try:
+                    record = future.result(timeout=FUTURE_TIMEOUT)
+                    results.append(record); _save_result(record, buyer, seller)
 
-        future_to_idx = {
-            executor.submit(run_and_log, idx, listing, args.buyer_model, args.seller_model, args.data_split, cur_date_time, log_subdir): idx
-            for idx, listing in enumerate(updated_processed_data)
-        }
-
-        for future in tqdm(
-            as_completed(future_to_idx),
-            total=len(future_to_idx),
-            desc=f"Processing {args.data_split} data",
-        ):
-            idx = future_to_idx[future]
-            try:
-                record = future.result()   # one listing’s result
-                results.append(record)     # (optional) keep aggregate
-                _save_result(record)       # ← immediate, crash‑safe write
-            # except Exception as exc:
-            #     print(f"[Listing {idx}] failed with: {exc}")
-
-            except Exception as exc:
-                print(f"[Listing {idx}] failed with: {exc}")
-                fail_record = {
-                    "session_id": f"{cur_date_time}_{_sanitize(args.buyer_model)}_{_sanitize(args.seller_model)}_{args.data_split}_{idx}",
-                    "error": str(exc),
-                    "listing_index": idx,
-                    "listing_data": tasks[idx][1],  # the original listing dict
-                }
-                with save_lock:
-                    with open(failed_output_file, "a", encoding="utf-8") as fp:
+                except TimeoutError:
+                    print(f"[{buyer} | {seller} | listing {idx}] "
+                          f"timed out after {FUTURE_TIMEOUT}s – skipping.")
+                    fail_record = {
+                        "session_id": f"{cur_date_time}_{_sanitize(buyer)}_"
+                                      f"{_sanitize(seller)}_{args.data_split}_{idx}",
+                        "error": f"timeout>{FUTURE_TIMEOUT}s",
+                        "listing_index": idx,
+                        "buyer_model": buyer,
+                        "seller_model": seller,
+                    }
+                    res_path, fail_path, lock = _get_paths(buyer, seller)
+                    with lock, open(fail_path, "a", encoding="utf-8") as fp:
                         json.dump(fail_record, fp)
                         fp.write("\n")
                         fp.flush()
 
+
+                except CancelledError:
+                    print(f"[{buyer} | {seller} | listing {idx}] was cancelled.")
+
+                except Exception as exc:
+                    print(f"[{buyer} | {seller} | listing {idx}] failed: {exc}")
+                    fail_record = {
+                        "session_id": f"{cur_date_time}_{_sanitize(buyer)}_"
+                                      f"{_sanitize(seller)}_{args.data_split}_{idx}",
+                        "error": str(exc),
+                        "listing_index": idx,
+                        "buyer_model": buyer,
+                        "seller_model": seller,
+                    }
+
+                    res_path, fail_path, lock = _get_paths(buyer, seller)
+                    with lock, open(fail_path, "a", encoding="utf-8") as fp:
+                        json.dump(fail_record, fp)
+                        fp.write("\n")
+                        fp.flush()
+
+
+    except KeyboardInterrupt:
+        print("\nCaught KeyboardInterrupt — shutting down executor …")
+        if executor:
+            executor.shutdown(wait=False, cancel_futures=True)
+        raise
 
     # ---------------------------------------------------------------------
     # Optional: also write full aggregated list (old behaviour)

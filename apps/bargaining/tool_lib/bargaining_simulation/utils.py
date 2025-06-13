@@ -5,104 +5,148 @@ from datetime import datetime
 import numpy as np
 from typing import List, Dict, Any, Optional
 
+from typing import List, Dict, Any, Optional
+import numpy as np
+
 
 def sample_private_values_for_dataset(
     dataset: List[Dict[str, Any]],
-    gain_from_trade: bool = True,
     random_seed: Optional[int] = None,
+    mode: str = "uniform",
+    *,
+    gamma: float = 0.10,
+    low_factor: float = 0.40,
+    seller_low_mult: float = 0.60,
+    seller_high_mult: float = 0.90,
+    buffer: float = 0.01,
 ) -> List[Dict[str, Any]]:
-    """
-    Sample the seller's private cost and the buyer's private value for every listing in
-    *dataset* using a deterministic NumPy random matrix.
+    """Generate *private* seller costs and buyer values for every listing.
 
-    A 2‑column matrix ``R`` of independent draws from :math:`\text{Uniform}(0,1)` is
-    produced first:
+    This implementation follows **Option ② — independent draws with
+    post‑stratification**:
 
-    * **Shape:** ``(N, 2)`` where ``N = len(dataset)``.
-    * **Seeding:** ``numpy.random.seed(random_seed)`` if *random_seed* is not ``None``.
-    * **Usage:**
-        * ``R[i, 0]`` → seller‑cost draw for listing *i*.
-        * ``R[i, 1]`` → buyer‑value draw for listing *i*.
+    1.  **Seller cost** is always sampled from a fixed band strictly below the
+        historical *lowest* market price::
 
-    The raw draws are then linearly mapped into economically meaningful intervals while
-    preserving the boundaries used in the original implementation.
+            c_s ~ U[ seller_low_mult × L , seller_high_mult × L ]
 
-    **Seller cost (all modes)**
-        ``seller_cost_i = 0.6·low_i  +  R[i,0] · (0.9·low_i  − 0.6·low_i)``
-        ∈ ``[0.6 × lowest_price, 0.9 × lowest_price]``
+        with the defaults 0.60 × L and 0.90 × L.
 
-    **Buyer value**
-        *Gain from trade* ``(gain_from_trade=True)``
-            ``buyer_value_i = (seller_cost_i+0.01) + R[i,1] · (hi_i + 0.1·Δ_i − (seller_cost_i+0.01))``
-            where ``hi_i = highest_price`` and ``Δ_i = hi_i − low_i``.
-            Range: ``[seller_cost+0.01, highest_price + 0.1·(highest_price − lowest_price)]``.  
-            This ensures buyers are willing to pay at least 1 ¢ more than the seller’s cost.
+    2.  **Buyer value** is first drawn *independently* of *c_s* from a wide,
+        realistic interval that spans low‑ball offers to exuberant willingness
+        to pay::
 
-        *No gain from trade* ``(gain_from_trade=False)``
-            ``buyer_value_i = 0.4·low_i  + R[i,1] · ((seller_cost_i−0.01) − 0.4·low_i)``
-            Range: ``[0.4 × lowest_price, seller_cost − 0.01]``.  
-            This enforces an efficiency loss by making the buyer’s valuation below the
-            seller’s cost.
+            v_b ~ U[ low_factor × L , H + γ (H − L) ]
 
-    The function **mutates** each product dictionary by adding two rounded entries:
+        where *L* = ``lowest_price`` and *H* = ``highest_price``.
 
-    * ``'seller_private_cost'`` — float with 2‑decimal precision.
-    * ``'buyer_private_value'`` — float with 2‑decimal precision.
+    3.  A *regime* is enforced **only if** ``mode`` is set to
+       ``"force_gain_from_trade"`` or ``"force_no_gain_from_trade"``.
+       This is done via an *acceptance–rejection* loop that redraws **only the
+       buyer** until the inequality holds::
+
+            force_gain_from_trade   →   v_b  >  c_s  + buffer
+            force_no_gain_from_trade→   v_b  <  c_s  − buffer
+
+    4.  A deterministic RNG (`numpy.random.RandomState`) guarantees **full
+       reproducibility**: the same ``random_seed`` yields the same sequence of
+       draws and therefore the *same* (cost, value) pairs, while still allowing
+       variation across listings.
 
     Parameters
     ----------
     dataset : list[dict]
-        Each product must hold
-        ``product['lowest_price_info']['lowest_price']`` and
-        ``product['highest_price_info']['highest_price']``.
-    gain_from_trade : bool, default=True
-        Toggle between *gain* and *no‑gain* regimes described above.
+        Each listing dictionary must expose::
+
+            product['lowest_price_info']['lowest_price']
+            product['highest_price_info']['highest_price']
+
     random_seed : int | None, default=None
-        Random seed for full reproducibility; skipped when ``None``.
+        Seed for the internal RNG.  ``None`` → non‑deterministic.
+
+    mode : {'uniform', 'force_gain_from_trade', 'force_no_gain_from_trade'}
+        * ``'uniform'`` ‑ sample buyer values independently; *ex post* share of
+          gain‑from‑trade episodes is whatever arises naturally.
+        * ``'force_gain_from_trade'`` ‑ acceptance–rejection to guarantee
+          *v_b > c_s*.
+        * ``'force_no_gain_from_trade'`` ‑ acceptance–rejection to guarantee
+          *v_b < c_s*.
+
+    gamma : float, default=0.10
+        Head‑room fraction above the historical high when sampling buyer values.
+        Buyer upper bound = *H + γ (H − L)*.
+
+    low_factor : float, default=0.40
+        Multiplier for the buyer lower bound (× L).
+
+    seller_low_mult, seller_high_mult : float, defaults=(0.60, 0.90)
+        Multipliers for the seller cost band (× L).
+
+    buffer : float, default=0.01
+        Safety gap (in *currency units*) used in the inequality checks to avoid
+        equality edge‑cases.
 
     Returns
     -------
     list[dict]
-        The same list with the additional keys per listing.
+        The *same* list with two extra key–value pairs added to each listing::
+
+            'seller_bottomline_price'  → rounded seller cost
+            'buyer_bottomline_price'   → rounded buyer value
+
+    Notes
+    -----
+    • The function **mutates** the original dataset in place and also returns it
+      for convenience.
+    • Acceptance–rejection loops are expected to finish in ≈ 2 draws on average
+      when *buffer* is small and the buyer range is wide.
     """
 
-    # ── RNG initialisation ──────────────────────────────────────────────────────
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    # ────────────────────────────── RNG setup ────────────────────────────────
+    rng = np.random.RandomState(random_seed) if random_seed is not None else np.random
 
-    n = len(dataset)
-    random_draws = np.random.rand(n, 2)  # column‑0: seller, column‑1: buyer
-    # print(random_draws)
-    # ── Sampling loop ───────────────────────────────────────────────────────────
-    for i, product in enumerate(dataset):
-        low_price = product["lowest_price_info"]["lowest_price"]
-        high_price = product["highest_price_info"]["highest_price"]
+    # ───────────────────────── Main sampling loop ────────────────────────────
+    for product in dataset:
+        # --- Extract price anchors ------------------------------------------------
+        L = product["lowest_price_info"]["lowest_price"]
+        H = product["highest_price_info"]["highest_price"]
+        Δ = H - L  # price range width
 
-        # Seller cost mapping
-        seller_min = 0.6 * low_price
-        seller_max = 0.9 * low_price
-        seller_cost = seller_min + random_draws[i, 0] * (seller_max - seller_min)
+        # --- Seller cost: one draw, never resampled ------------------------------
+        seller_min = seller_low_mult * L
+        seller_max = seller_high_mult * L
+        seller_cost = seller_min + rng.rand() * (seller_max - seller_min)
 
-        # Buyer value mapping
-        if gain_from_trade:
-            buyer_min = seller_cost + 0.01
-            buyer_max = high_price + 0.1 * (high_price - low_price)
-        else:
-            buyer_min = 0.4 * low_price
-            buyer_max = seller_cost - 0.01
+        # --- Buyer value: depends on *mode* --------------------------------------
+        buyer_min = low_factor * L
+        buyer_max = H + gamma * Δ
 
-        # Guard against numerical issues where max == min
-        if buyer_max <= buyer_min:
-            buyer_max = buyer_min + 0.01
+        def draw_buyer() -> float:
+            """Draw a candidate buyer value from the *base* uniform."""
+            return buyer_min + rng.rand() * (buyer_max - buyer_min)
 
-        buyer_value = buyer_min + random_draws[i, 1] * (buyer_max - buyer_min)
+        buyer_value = draw_buyer()
 
-        # Attach rounded results back to product
+        if mode == "force_gain_from_trade":
+            # Keep drawing until buyer is willing to pay *strictly* above cost.
+            while buyer_value <= seller_cost + buffer:
+                buyer_value = draw_buyer()
+
+        elif mode == "force_no_gain_from_trade":
+            # Keep drawing until buyer value is *strictly* below cost.
+            while buyer_value >= seller_cost - buffer:
+                buyer_value = draw_buyer()
+
+        elif mode != "uniform":
+            raise ValueError(
+                "mode must be one of {'uniform', 'force_gain_from_trade', 'force_no_gain_from_trade'}"
+            )
+
+        # --- Attach rounded results back to product ------------------------------
         product["seller_bottomline_price"] = round(seller_cost, 2)
         product["buyer_bottomline_price"] = round(buyer_value, 2)
 
     return dataset
-
 
 def get_current_timestamp():
     now = datetime.now()
