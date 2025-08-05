@@ -123,10 +123,10 @@ if __name__ == "__main__":
 
     # load dataset
     try:
-        with open(f"./apps/bargaining/datasets/{args.dataset}/processed_data.json", "r") as file:
+        with open(f"./apps/bargaining/sim_datasets/{args.dataset}/processed_data.json", "r") as file:
             processed_data = json.load(file)
     except FileNotFoundError:
-        print(f"File not found: ./apps/bargaining/datasets/{args.dataset}/processed_data.json")
+        print(f"File not found: ./apps/bargaining/sim_datasets/{args.dataset}/processed_data.json")
         exit(1)
 
     with using_session(session_id=session_id):
