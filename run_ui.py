@@ -18,7 +18,6 @@ from smolagents.tools import Tool
 from src.custom_gradio_ui import stream_to_gradio
 from src.base_agent import ToolCallingAgent, CodeAgent
 
-
 # Initialize the configuration manager for agents and tools
 config_manager = AgentConfigManager()
 
