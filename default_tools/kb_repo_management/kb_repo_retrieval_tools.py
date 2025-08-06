@@ -45,7 +45,7 @@ class KeywordSearchKnowledgeBase(Tool):
     output_type = "string"
 
     ALLOWED_EXTENSIONS = {".py", ".md", ".txt"}
-    MAX_SIZE = 2 * 1024 * 1024  # 2 MB
+    MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 
     def __init__(self, repo_indexer: RepoIndexer, max_search_time: int = 10):
         super().__init__()

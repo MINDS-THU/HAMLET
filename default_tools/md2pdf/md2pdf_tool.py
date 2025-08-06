@@ -108,6 +108,8 @@ class CompileMarkdownToPDF(Tool):
                 extra_args=[
                     "--pdf-engine=xelatex",
                     "--toc",
+                    "--variable=mainfont=Noto Sans CJK SC",
+                    "--variable=monofont=Noto Sans Mono CJK SC",
                     # "--number-sections",
                 ],
             )

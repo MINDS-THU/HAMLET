@@ -60,7 +60,7 @@ class SeeFile(Tool):
             return str(e)
         if not os.path.exists(filepath):
             return f"The file {filename} does not exist."
-        with open(filepath, "r") as file:
+        with open(filepath, "r", encoding="utf-8") as file:
             lines = file.readlines()
         formatted_lines = [f"{i+1}:{line}" for i, line in enumerate(lines)]
         return "".join(formatted_lines)
@@ -99,7 +99,7 @@ class ModifyFile(Tool):
             return str(e)
         if not os.path.exists(filepath):
             return f"The file {filename} does not exist."
-        with open(filepath, "r+") as file:
+        with open(filepath, "r+", encoding="utf-8") as file:
             lines = file.readlines()
             lines[start_line - 1:end_line] = [new_content + "\n"]
             file.seek(0)
@@ -136,7 +136,7 @@ class CreateFileWithContent(Tool):
             filepath = self._safe_path(filename)
         except PermissionError as e:
             return str(e)
-        with open(filepath, "w") as file:
+        with open(filepath, "w", encoding="utf-8") as file:
             file.write(content)
         return "File created successfully."
 
