@@ -1,6 +1,6 @@
 from smolagents import CodeAgent, LiteLLMModel
 from custom_gradio_ui import GradioUI
-from general_tools.file_editing.file_editing_tools import (
+from default_tools.file_editing.file_editing_tools import (
     ListDir,
     SeeFile,
     ModifyFile,

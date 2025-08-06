@@ -1,0 +1,42 @@
+{
+  "fetch_arxiv_papers": {
+    "name": "fetch_arxiv_papers",
+    "description": "Fetch papers from arXiv based on search query",
+    "category": "research"
+  },
+  "open_deep_search": {
+    "name": "open_deep_search",
+    "description": "Perform deep web search for comprehensive information",
+    "category": "search"
+  },
+  "file_editing": {
+    "name": "file_editing",
+    "description": "Edit and manage local files",
+    "category": "file"
+  },
+  "text_web_browser": {
+    "name": "text_web_browser",
+    "description": "Browse web pages and extract text content",
+    "category": "web"
+  },
+  "text_inspector": {
+    "name": "text_inspector",
+    "description": "Analyze and inspect text content",
+    "category": "analysis"
+  },
+  "kb_repo_management": {
+    "name": "kb_repo_management",
+    "description": "Manage knowledge base repositories",
+    "category": "knowledge"
+  },
+  "visual_qa": {
+    "name": "visual_qa",
+    "description": "Answer questions about visual content",
+    "category": "vision"
+  },
+  "talk_to_user": {
+    "name": "talk_to_user",
+    "description": "Direct communication with user",
+    "category": "communication"
+  }
+}

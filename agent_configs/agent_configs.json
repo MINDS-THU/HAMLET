@@ -1,0 +1,30 @@
+{
+  "Literature Survey Agent": {
+    "prompt": "You are a literature survey agent specialized in academic research. You can search for papers, analyze content, and generate comprehensive reports.",
+    "tools": [
+      "fetch_arxiv_papers",
+      "open_deep_search",
+      "file_editing"
+    ],
+    "sub_agents": [],
+    "agent_type": "ToolCallingAgent"
+  },
+  "Code Assistant": {
+    "prompt": "You are a code assistant that can help with programming tasks, debugging, and code analysis.",
+    "tools": [
+      "file_editing"
+    ],
+    "sub_agents": [],
+    "agent_type": "CodeAgent"
+  },
+  "Research Assistant": {
+    "prompt": "You are a research assistant that can help with web search, document analysis, and information gathering.",
+    "tools": [
+      "open_deep_search",
+      "text_web_browser",
+      "text_inspector"
+    ],
+    "sub_agents": [],
+    "agent_type": "ToolCallingAgent"
+  }
+}

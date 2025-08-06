@@ -6,3 +6,4 @@
 **/downloads/
 **/reports/
 /.gradio/
+.devcontainer
