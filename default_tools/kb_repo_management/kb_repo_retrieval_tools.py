@@ -69,11 +69,11 @@ class KeywordSearchKnowledgeBase(Tool):
             return (time.time() - start_time) > self.max_search_time
 
         if os.path.isfile(target_path):
-            if not any(target_path.endswith(ext) for ext in self.ALLOWED_EXTENSIONS):
+            if not any(str(target_path).endswith(ext) for ext in self.ALLOWED_EXTENSIONS):
                 return f"[{path}]: Skipped (unsupported file type)"
             if os.path.getsize(target_path) > self.MAX_SIZE:
                 return f"[{path}]: Skipped (file too large)"
-            return self._search_in_file(target_path, keyword, context_lines, display_path=path)
+            return self._search_in_file(str(target_path), keyword, context_lines, display_path=path)
         elif os.path.isdir(target_path):
             results = []
             for root, _, files in os.walk(target_path):

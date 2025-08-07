@@ -67,18 +67,20 @@ def chunk_python(path: Path) -> List[Dict[str, Any]]:
             )
 
             text = "\n".join(lines[start : end + 1])
-            uid = f"{norm_path}:{start}:{end}"
-            chunks.append({
-                "id": uid,
-                "content": text,
-                "meta": {
-                    "file": str(norm_path),
-                    "start_line": start + 1,
-                    "end_line": end + 1,
-                    "type": node.__class__.__name__,
-                    "content": text,  # embed content directly
-                },
-            })
+            # Only create chunk if text is not empty
+            if text and text.strip():
+                uid = f"{norm_path}:{start}:{end}"
+                chunks.append({
+                    "id": uid,
+                    "content": text,
+                    "meta": {
+                        "file": str(norm_path),
+                        "start_line": start + 1,
+                        "end_line": end + 1,
+                        "type": node.__class__.__name__,
+                        "content": text,  # embed content directly
+                    },
+                })
     return chunks
 
 
@@ -86,6 +88,11 @@ def chunk_python(path: Path) -> List[Dict[str, Any]]:
 def chunk_markdown(path: Path) -> List[Dict[str, Any]]:
     text = path.read_text(encoding="utf-8", errors="ignore")
     norm_path = str(path.resolve())
+    
+    # Skip if text is empty or only whitespace
+    if not text or not text.strip():
+        return []
+        
     # skip chunking if the file is small
     if len(text) < 500:
         return [{
@@ -103,17 +110,19 @@ def chunk_markdown(path: Path) -> List[Dict[str, Any]]:
     blocks = splitter.split_text(text)
     chunks: List[Dict[str, Any]] = []
     for i, block in enumerate(blocks):
-        uid = f"{norm_path}:chunk-{i}"
-        chunks.append({
-            "id": uid,
-            "content": block,
-            "meta": {
-                "file": str(norm_path),
-                "type": "Text",
-                "index": i,
-                "content": block  # ✅ Add this line
-            },
-        })
+        # Only create chunk if block is not empty
+        if block and block.strip():
+            uid = f"{norm_path}:chunk-{i}"
+            chunks.append({
+                "id": uid,
+                "content": block,
+                "meta": {
+                    "file": str(norm_path),
+                    "type": "Text",
+                    "index": i,
+                    "content": block  # ✅ Add this line
+                },
+            })
     return chunks
 
 
@@ -261,17 +270,25 @@ class RepoIndexer:
     def _reindex_file(self, path: Path, sig: Optional[tuple[int, int]] = None):
         norm_path = str(path.resolve())
         new_chunks = chunk_file(path)
+        
+        # Filter out chunks with empty or invalid content
+        valid_chunks = []
+        for chunk in new_chunks:
+            content = chunk.get("content", "")
+            if content and content.strip():  # Only keep chunks with non-empty content
+                valid_chunks.append(chunk)
+        
         old_ids = [id_ for id_, m in self.store.meta.items() if m["file"] == norm_path]
         if old_ids:
             self.store.remove(old_ids)
-        if new_chunks:
-            ids = [c["id"] for c in new_chunks]
-            vecs = embed_texts([c["content"] for c in new_chunks], self.client, self.embed_model)
-            for c in new_chunks:
+        if valid_chunks:
+            ids = [c["id"] for c in valid_chunks]
+            vecs = embed_texts([c["content"] for c in valid_chunks], self.client, self.embed_model)
+            for c in valid_chunks:
                 c["meta"]["sig"] = sig or _file_sig(path)
                 c["meta"]["content"] = c["content"]
                 c["meta"]["file"] = norm_path  # always store normalized path
-            metas = [c["meta"] for c in new_chunks]
+            metas = [c["meta"] for c in valid_chunks]
             self.store.add(ids, vecs, metas)
 
     # def _delete_file(self, path: Path):

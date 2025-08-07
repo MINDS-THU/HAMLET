@@ -28,10 +28,13 @@ cd HAMLET
 From the root of `HAMLET`, execute:
 
 ```bash
-conda create -n hamlet_env python=3.10
+conda create -n hamlet_env python=3.10 -y
 conda activate hamlet_env
+
+conda install -c conda-forge faiss-cpu mkl intel-openmp numpy pandas -y
+conda install pytorch -y
+
 pip install -r requirements.txt
-conda install -c conda-forge pandoc
 ```
 
 ### 3. Register for Required API Keys
@@ -54,5 +57,12 @@ JINA_API_KEY=your_jina_api_key
 HF_TOKEN=your_huggingface_token  # Optional: for Hugging Face model access or Gradio deployment
 # Optionally, add other keys as needed
 ```
+
+### 5. Run an App
+```
+python -m example_app.run --mode gradio
+```
+Then open the launched Gradio interface in your browser and start interacting with the agent.
+
 
 ---

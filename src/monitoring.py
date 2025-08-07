@@ -235,6 +235,11 @@ class AgentLogger:
             ),
             level=level,
         )
+        string_output = f"======== task ========\n"+"{}".format(content)
+        log_entry = f"{string_output}\n"
+        if self.log_file:
+            self.log_file.write(log_entry)
+            self.log_file.flush()
 
     def log_messages(self, messages: List) -> None:
         messages_as_string = "\n".join([json.dumps(dict(message), indent=4) for message in messages])
