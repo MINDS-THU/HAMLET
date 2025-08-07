@@ -1,9 +1,9 @@
 # HAMLET (Hierarchical Agents for Multi-level Learning, Execution & Tasking)
 
-HAMLET is a framework built on top of smolagents that serves as the foundational codebase for developing AI assistants. It provides tools and infrastructure for creating language model agents capable of decomposing and solving complex tasks through structured, multi-step processes.
+HAMLET is a framework built on top of smolagents that provides tools and infrastructure for developing language model agents capable of decomposing and solving complex tasks through structured, multi-step reasoning. It is currently being designed as the foundational codebase for building AI assistants within our department, supporting use cases such as general question answering, web and database search, AI-powered tutoring, and course-related problem solving.
 
 ## Default Tools
-The following tools are included in the project to give LLM agents the basic capabilities for file management, knowledge retrieval, web search, document processing, and image processing:
+The following tools are included to give LLM agents the basic capabilities for file management, knowledge retrieval, web search, document processing, and image processing:
 
 ### **File Management & Editing**
 - **[File Editing Tools](default_tools/file_editing/file_editing_tools.py)**: Complete file system operations including directory listing, file reading/writing, content modification, keyword search, and file deletion within the working directory.
