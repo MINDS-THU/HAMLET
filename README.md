@@ -1,9 +1,9 @@
 # HAMLET (Hierarchical Agents for Multi-level Learning, Execution & Tasking)
 
-HAMLET is a framework built on top of smolagents for creating and training hierarchical language model agents that decompose and solve complex tasks through multi-level planning.
+HAMLET is a framework built on top of smolagents that serves as the foundational codebase for developing AI assistants. It provides tools and infrastructure for creating language model agents capable of decomposing and solving complex tasks through structured, multi-step processes.
 
 ## Default Tools
-The following tools are included in the project to enable LLM agents with basic capabilities for file management, knowledge retrieval, web search, document processing, and image processing:
+The following tools are included in the project to give LLM agents the basic capabilities for file management, knowledge retrieval, web search, document processing, and image processing:
 
 ### **File Management & Editing**
 - **[File Editing Tools](default_tools/file_editing/file_editing_tools.py)**: Complete file system operations including directory listing, file reading/writing, content modification, keyword search, and file deletion within the working directory.
@@ -37,9 +37,7 @@ cd HAMLET
 
 ### 2. Install Dependencies
 
-- **Python packages** (conda installation recommended):
-
-From the root of `HAMLET`, execute:
+Conda installation recommended. From the root of `HAMLET`, execute:
 
 ```bash
 conda create -n hamlet_env python=3.10 -y
@@ -83,8 +81,8 @@ A pre-configured example application is included in `example_app/` that demonstr
 ```bash
 (hamlet_env) C:\Files\HAMLET>python -m example_app.run
 CodeAgent | gpt-4.1
-├── ✅ Authorized imports: []
-└── 🛠️ Tools:
+├── Authorized imports: []
+└── Tools:
     ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
     ┃ Name                           ┃ Description                            ┃ Arguments                              ┃
     ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
