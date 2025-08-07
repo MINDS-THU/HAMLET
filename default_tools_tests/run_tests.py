@@ -28,7 +28,7 @@ def run_tests(target: str = None):
         exit(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="Run unit tests for general_tools.")
+    parser = argparse.ArgumentParser(description="Run unit tests for default_tools.")
     parser.add_argument(
         "--tool",
         type=str,
