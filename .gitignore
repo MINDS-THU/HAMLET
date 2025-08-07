@@ -1,9 +1,6 @@
 /.env
 **/__pycache__/
-**/logs/
-**/results/
-**/temp_files/
-**/downloads/
-**/reports/
+**/working_dirs/
+**/persistent_storage/
+**/index_dir/
 /.gradio/
-.devcontainer

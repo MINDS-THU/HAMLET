@@ -58,7 +58,12 @@ class KeywordSearchKnowledgeBase(Tool):
             return "Error: Absolute paths are not allowed. Please specify a relative path within the knowledge base. For example use '.' to search in the root of knowledge base."
         # Prevent directory traversal
         target_path = (self.knowledge_base_dir / path).resolve()
-        if not str(target_path).startswith(str(self.knowledge_base_dir.resolve())):
+        
+        # Convert both to strings with consistent separators for comparison
+        abs_root_str = str(self.knowledge_base_dir.resolve()).replace('\\', '/').lower()
+        abs_path_str = str(target_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             return "Error: Path escapes the knowledge base directory."
 
         start_time = time.time()
@@ -156,15 +161,29 @@ class CopyFromKnowledgeBase(Tool):
 
     def _safe_kb_path(self, path: str) -> Path:
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.root / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
     def _safe_working_path(self, path: str) -> Path:
         abs_root = self.working_dir.resolve()
-        abs_path = (self.working_dir / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.working_dir / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the working directory is not allowed.")
         return abs_path
 
@@ -199,8 +218,18 @@ class CopyFromKnowledgeBase(Tool):
 
         if src.is_dir():
             shutil.copytree(src, dst)
-            return f"Directory '{source_path}' copied to '{dst.relative_to(self.working_dir)}' (no overwrite)."
+            # Safe relative path calculation
+            try:
+                dst_rel = dst.relative_to(self.working_dir)
+            except ValueError:
+                dst_rel = dst.name
+            return f"Directory '{source_path}' copied to '{dst_rel}' (no overwrite)."
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-            return f"File '{source_path}' copied to '{dst.relative_to(self.working_dir)}' (no overwrite)."
+            # Safe relative path calculation
+            try:
+                dst_rel = dst.relative_to(self.working_dir)
+            except ValueError:
+                dst_rel = dst.name
+            return f"File '{source_path}' copied to '{dst_rel}' (no overwrite)."

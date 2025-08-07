@@ -1,6 +1,25 @@
 """
-Knowledge Base Repo Addition Tools
-This module contains tools for adding new content to a structured knowledge base.
+Knowledge Base Repo Addition Tools        return new_path
+
+    def _safe_kb_path(self, path: str) -> Path:
+        # Ensure root is absolute for proper comparison
+        abs_root = self.root.resolve()
+        
+        # Handle both absolute and relative paths
+        if Path(path).is_absolute():
+            abs_path = Path(path).resolve()
+        else:
+            abs_path = (self.root / path).resolve()
+            
+        # Convert both to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/')
+        abs_path_str = str(abs_path).replace('\\', '/')
+        
+        if not abs_path_str.startswith(abs_root_str):
+            raise PermissionError("Access outside the knowledge base root is not allowed.")
+        return abs_path
+
+    def forward(self, source_path: str, destination_path: str, overwrite: bool) -> str:ule contains tools for adding new content to a structured knowledge base.
 Supports writing new files, copying files or folders from the working directory,
 and appending content to existing files. All updates are automatically indexed
 for semantic search.
@@ -40,9 +59,20 @@ class WriteToKnowledgeBase(Tool):
         return new_path
 
     def _safe_kb_path(self, path: str) -> Path:
+        # Ensure root is absolute for proper comparison
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        
+        # Handle both absolute and relative paths
+        if Path(path).is_absolute():
+            abs_path = Path(path).resolve()
+        else:
+            abs_path = (self.root / path).resolve()
+            
+        # Convert both to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/')
+        abs_path_str = str(abs_path).replace('\\', '/')
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
@@ -62,7 +92,13 @@ class WriteToKnowledgeBase(Tool):
 
         self.repo_indexer.update_file(dst)
 
-        return f"Wrote content to '{dst.relative_to(self.root)}'. File has been indexed for semantic search."
+        # Safe relative path calculation
+        try:
+            rel_path = dst.relative_to(self.root)
+        except ValueError:
+            rel_path = dst.name
+
+        return f"Wrote content to '{rel_path}'. File has been indexed for semantic search."
 
 
 class CopyToKnowledgeBase(Tool):
@@ -94,16 +130,38 @@ class CopyToKnowledgeBase(Tool):
         return new_path
 
     def _safe_working_path(self, path: str) -> Path:
-        abs_root = self.working_dir.resolve()
-        abs_path = (self.working_dir / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Ensure working_dir is absolute for proper comparison
+        abs_working_dir = self.working_dir.resolve()
+        
+        # Handle both absolute and relative paths
+        if Path(path).is_absolute():
+            abs_path = Path(path).resolve()
+        else:
+            abs_path = (self.working_dir / path).resolve()
+            
+        # Convert both to strings with consistent separators for comparison
+        abs_working_str = str(abs_working_dir).replace('\\', '/')
+        abs_path_str = str(abs_path).replace('\\', '/')
+        
+        if not abs_path_str.startswith(abs_working_str):
             raise PermissionError("Access outside the working directory is not allowed.")
         return abs_path
 
     def _safe_kb_path(self, path: str) -> Path:
+        # Ensure root is absolute for proper comparison
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        
+        # Handle both absolute and relative paths
+        if Path(path).is_absolute():
+            abs_path = Path(path).resolve()
+        else:
+            abs_path = (self.root / path).resolve()
+            
+        # Convert both to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/')
+        abs_path_str = str(abs_path).replace('\\', '/')
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
@@ -141,13 +199,27 @@ class CopyToKnowledgeBase(Tool):
         if dst.is_dir():
             for file in dst.rglob("*.*"):
                 self.repo_indexer.update_file(file)
-                updated_files.append(str(file.relative_to(self.root)))
+                try:
+                    rel_file = file.relative_to(self.root)
+                except ValueError:
+                    rel_file = file.name
+                updated_files.append(str(rel_file))
         else:
             self.repo_indexer.update_file(dst)
-            updated_files.append(str(dst.relative_to(self.root)))
+            try:
+                rel_dst = dst.relative_to(self.root)
+            except ValueError:
+                rel_dst = dst.name
+            updated_files.append(str(rel_dst))
+
+        # Safe relative path for main message
+        try:
+            dst_rel = dst.relative_to(self.root)
+        except ValueError:
+            dst_rel = dst.name
 
         return (
-            f"Copied '{source_path}' to '{dst.relative_to(self.root)}'. "
+            f"Copied '{source_path}' to '{dst_rel}'. "
             f"Indexed {len(updated_files)} file(s): {', '.join(updated_files)}."
         )
 
@@ -182,9 +254,20 @@ class AppendToKnowledgeBaseFile(Tool):
         self.repo_indexer = repo_indexer
 
     def _safe_kb_path(self, path: str) -> Path:
+        # Ensure root is absolute for proper comparison
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        
+        # Handle both absolute and relative paths
+        if Path(path).is_absolute():
+            abs_path = Path(path).resolve()
+        else:
+            abs_path = (self.root / path).resolve()
+            
+        # Convert both to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/')
+        abs_path_str = str(abs_path).replace('\\', '/')
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 

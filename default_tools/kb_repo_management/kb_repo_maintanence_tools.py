@@ -41,8 +41,15 @@ class ListKnowledgeBaseDirectory(Tool):
     
     def _safe_kb_path(self, path: str) -> Path:
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.root / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
@@ -80,8 +87,15 @@ class SeeKnowledgeBaseFile(Tool):
 
     def _safe_kb_path(self, path: str) -> Path:
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.root / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
@@ -126,12 +140,26 @@ class MoveOrRenameInKnowledgeBase(Tool):
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
-        return f"Moved or renamed '{source_path}' to '{dst.relative_to(self.root)}' in the knowledge base."
+        
+        # Safe relative path calculation
+        try:
+            dst_rel = dst.relative_to(self.root)
+        except ValueError:
+            dst_rel = dst.name
+            
+        return f"Moved or renamed '{source_path}' to '{dst_rel}' in the knowledge base."
 
     def _safe_kb_path(self, path: str) -> Path:
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.root / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path
 
@@ -167,7 +195,14 @@ class DeleteFromKnowledgeBase(Tool):
 
     def _safe_kb_path(self, path: str) -> Path:
         abs_root = self.root.resolve()
-        abs_path = (self.root / path).resolve()
-        if not str(abs_path).startswith(str(abs_root)):
+        # Normalize the path to use consistent separators
+        normalized_path = str(path).replace('/', os.sep).replace('\\', os.sep)
+        abs_path = (self.root / normalized_path).resolve()
+        
+        # Convert to strings with consistent separators for comparison
+        abs_root_str = str(abs_root).replace('\\', '/').lower()
+        abs_path_str = str(abs_path).replace('\\', '/').lower()
+        
+        if not abs_path_str.startswith(abs_root_str):
             raise PermissionError("Access outside the knowledge base root is not allowed.")
         return abs_path

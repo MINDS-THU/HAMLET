@@ -5,6 +5,8 @@ import shutil
 import time
 import threading
 from typing import Optional
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -26,6 +28,66 @@ from default_tools import get_available_tools, create_tool_instance
 
 # Initialize the configuration manager for agents and tools
 config_manager = AgentConfigManager()
+
+class FileWatcher:
+    """A simple file system watcher using watchdog."""
+    def __init__(self):
+        self.observer = None
+        self.event_handler = None
+        self.callback = None
+        
+    def start_watching(self, directory: str, callback):
+        """Start watching a directory for changes."""
+        try:
+            # Stop any existing watcher
+            self.stop_watching()
+            
+            self.callback = callback
+            self.event_handler = FileChangeHandler(callback)
+            self.observer = Observer()
+            self.observer.schedule(self.event_handler, directory, recursive=True)
+            self.observer.start()
+            print(f"Started watching directory: {directory}")
+        except Exception as e:
+            print(f"Error starting file watcher: {e}")
+            # Create a dummy watcher that doesn't crash
+            self.observer = None
+    
+    def stop_watching(self):
+        """Stop the file watcher."""
+        if self.observer:
+            try:
+                self.observer.stop()
+                self.observer.join()
+            except Exception as e:
+                print(f"Error stopping file watcher: {e}")
+            finally:
+                self.observer = None
+    
+    def __del__(self):
+        """Cleanup when object is destroyed."""
+        self.stop_watching()
+
+class FileChangeHandler(FileSystemEventHandler):
+    """Handles file system events."""
+    def __init__(self, callback):
+        self.callback = callback
+        self.last_event_time = 0
+        
+    def on_any_event(self, event):
+        """Handle any file system event with debouncing."""
+        current_time = time.time()
+        # Debounce events - only trigger callback every 0.5 seconds
+        if current_time - self.last_event_time > 0.5:
+            self.last_event_time = current_time
+            if self.callback:
+                try:
+                    self.callback()
+                except Exception as e:
+                    print(f"Error in file watcher callback: {e}")
+
+# Initialize the file watcher
+file_watcher = FileWatcher()
 
 def test_api_key():
     """Test if the OpenAI API key is working."""

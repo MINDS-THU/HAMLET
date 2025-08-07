@@ -47,7 +47,7 @@ def create_example_agent(model_id="gpt-4.1", working_directory="working_dir", pe
 
     ### Set up the tools ###
     # tools for working with the local working directory
-    workding_directory_file_editing_tools = [
+    working_directory_file_editing_tools = [
         ListDir(working_directory),
         SeeFile(working_directory),
         ModifyFile(working_directory),
@@ -81,10 +81,14 @@ def create_example_agent(model_id="gpt-4.1", working_directory="working_dir", pe
             ListKnowledgeBaseDirectory(idx),
             SeeKnowledgeBaseFile(idx),
             SemanticSearchKnowledgeBase(idx),
-            KeywordSearchKnowledgeBase(idx),
+        ]
+        knowledge_base_update_tools = [
+            WriteToKnowledgeBase(idx),
+            CopyToKnowledgeBase(idx, working_directory),
         ]
     else:
         knowledge_base_retrieval_tools = []
+        knowledge_base_update_tools = []
 
     # tool for reading image
     visual_qa_tools = [visualizer]
@@ -99,7 +103,7 @@ def create_example_agent(model_id="gpt-4.1", working_directory="working_dir", pe
         )
     # manager agent is responsible for directly talking with user and call sub-agents to complete user tasks
     manager_agent = CodeAgent(
-        tools=workding_directory_file_editing_tools+search_tools+knowledge_base_retrieval_tools+visual_qa_tools,
+        tools=working_directory_file_editing_tools+search_tools+knowledge_base_retrieval_tools+knowledge_base_update_tools+visual_qa_tools,
         model=model,
         managed_agents=[],
         planning_interval=None,
@@ -147,7 +151,7 @@ if __name__ == "__main__":
     args = argparser.parse_args()
 
     # Ensure the base temp_files directory exists
-    base_temp_dir = "example_app/workding_dirs"
+    base_temp_dir = "example_app/working_dirs"
     Path(base_temp_dir).mkdir(parents=True, exist_ok=True)
 
     # Set the save directory to a default if not provided

@@ -332,8 +332,12 @@ class RepoIndexer:
         header = f"\n🔍 Semantic Search Results\nQuery: {query}\n{'=' * 60}\n"
         result_blocks = []
         for i, hit in enumerate(self.semantic_search(query, k=k), 1):
-            # rel_path = Path(hit["file"]).relative_to(self.root)
-            rel_path = Path(hit["file"]).resolve().relative_to(self.root.resolve())
+            # Use safe relative path calculation to avoid Windows path issues
+            try:
+                rel_path = Path(hit["file"]).resolve().relative_to(self.root.resolve())
+            except ValueError:
+                # Fallback: if relative_to fails, just use the filename
+                rel_path = Path(hit["file"]).name
             score = hit["score"]
             content = hit.get("content", "[No content]").strip()
             block = (
@@ -367,7 +371,12 @@ class RepoIndexer:
         header = f"\n🔍 Semantic Search Results (Unique)\nQuery: {query}\n{'=' * 60}\n"
         result_blocks = []
         for i, hit in enumerate(final_results, 1):
-            rel_path = Path(hit["file"]).resolve().relative_to(self.root.resolve())
+            # Use safe relative path calculation to avoid Windows path issues
+            try:
+                rel_path = Path(hit["file"]).resolve().relative_to(self.root.resolve())
+            except ValueError:
+                # Fallback: if relative_to fails, just use the filename
+                rel_path = Path(hit["file"]).name
             score = hit["score"]
             content = hit.get("content", "[No content]").strip()
             block = (
