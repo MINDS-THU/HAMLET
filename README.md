@@ -78,8 +78,8 @@ A pre-configured example application is included in `example_app/` that demonstr
 ```bash
 (hamlet_env) C:\Files\HAMLET>python -m example_app.run
 CodeAgent | gpt-4.1
-├── Authorized imports: []
-└── Tools:
+├── ✅ Authorized imports: []
+└── 🛠️ Tools:
     ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
     ┃ Name                           ┃ Description                            ┃ Arguments                              ┃
     ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
@@ -88,12 +88,20 @@ CodeAgent | gpt-4.1
     │                                │ structure. Note: only files under the  │                                        │
     │                                │ allowed working directory are          │                                        │
     │                                │ accessible.                            │                                        │
-    │ see_file                       │ View the content of a chosen plain     │ filename (`string`): Name of the file  │
+    │ see_text_file                  │ View the content of a chosen plain     │ filename (`string`): Name of the file  │
     │                                │ text file (e.g., .txt, .md, .py,       │ to check.                              │
     │                                │ .log). Not suitable for binary files   │                                        │
     │                                │ such as .pdf, .docx, .xlsx, or         │                                        │
     │                                │ images.Note: only files under the      │                                        │
     │                                │ working directory are accessible.      │                                        │
+    │ read_binary_as_markdown        │ Read a binary file (PDF, Word, Excel,  │ filename (`string`): Name of the file  │
+    │                                │ PowerPoint, image, audio, etc.) and    │ to read and convert.                   │
+    │                                │ convert it to markdown using           │                                        │
+    │                                │ MarkItDown. Returns the markdown       │                                        │
+    │                                │ content if successful, or an error     │                                        │
+    │                                │ message if conversion fails. Only      │                                        │
+    │                                │ files under the working directory are  │                                        │
+    │                                │ accessible.                            │                                        │
     │ modify_file                    │ Modify a plain text file by replacing  │ filename (`string`): Name of the file  │
     │                                │ specific lines with new content. Only  │ to modify.                             │
     │                                │ works with plain text files (e.g.,     │ start_line (`integer`): Start line     │
@@ -139,12 +147,10 @@ CodeAgent | gpt-4.1
     │                                │ adds suffix to avoid conflict. All new │ overwrite (`boolean`): Whether to      │
     │                                │ or updated files are indexed for       │ overwrite existing files or folders.   │
     │                                │ semantic search.                       │                                        │
-    │ visualizer                     │ A tool that can answer questions about │ image_path (`string`): The path to the │
-    │                                │ attached images.                       │ image on which to answer the question. │
-    │                                │                                        │ This should be a local path to         │
-    │                                │                                        │ downloaded image.                      │
-    │                                │                                        │ question (`string`): The question to   │
-    │                                │                                        │ answer.                                │
+    │ visualizer                     │ A tool that can answer questions about │ image_path (`string`): Path to the     │
+    │                                │ attached images using vision-language  │ image file.                            │
+    │                                │ models. Only images under the working  │ question (`string`): Question to       │
+    │                                │ directory are accessible.              │ answer about the image.                │
     │ final_answer                   │ Provides a final answer to the given   │ answer (`any`): The final answer to    │
     │                                │ problem.                               │ the problem                            │
     └────────────────────────────────┴────────────────────────────────────────┴────────────────────────────────────────┘
