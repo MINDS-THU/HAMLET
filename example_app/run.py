@@ -8,7 +8,8 @@ from src.agent_conversation_ui import GradioUI
 from src.monitoring import AgentLogger, LogLevel
 from default_tools.file_editing.file_editing_tools import (
     ListDir,
-    SeeFile,
+    SeeTextFile,
+    ReadBinaryAsMarkdown,
     ModifyFile,
     CreateFileWithContent,
 )
@@ -29,9 +30,8 @@ from default_tools.kb_repo_management.kb_repo_addition_tools import (
     CopyToKnowledgeBase,
     AppendToKnowledgeBaseFile,
 )
-from default_tools.visual_qa.visual_qa import visualizer
+from default_tools.visual_qa.visual_qa import Visualizer
 from default_tools.open_deep_search.ods_tool import OpenDeepSearchTool
-from default_tools.md2pdf.md2pdf_tool import CompileMarkdownToPDF
 import tempfile
 import time
 
@@ -49,7 +49,8 @@ def create_example_agent(model_id="gpt-4.1", working_directory="working_dir", pe
     # tools for working with the local working directory
     working_directory_file_editing_tools = [
         ListDir(working_directory),
-        SeeFile(working_directory),
+        SeeTextFile(working_directory),
+        ReadBinaryAsMarkdown(working_directory),
         ModifyFile(working_directory),
         CreateFileWithContent(working_directory),
     ]
@@ -91,7 +92,7 @@ def create_example_agent(model_id="gpt-4.1", working_directory="working_dir", pe
         knowledge_base_update_tools = []
 
     # tool for reading image
-    visual_qa_tools = [visualizer]
+    visual_qa_tools = [Visualizer(working_directory)]
 
     ### Set up the agent ###
     app_name="example_app"

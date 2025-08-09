@@ -6,7 +6,7 @@ HAMLET is a framework built on top of smolagents that provides tools and infrast
 The following tools are included to give LLM agents the basic capabilities for file management, knowledge retrieval, web search, document processing, and image processing:
 
 ### **File Management & Editing**
-- **[File Editing Tools](default_tools/file_editing/file_editing_tools.py)**: Complete file system operations including directory listing, file reading/writing, content modification, keyword search, and file deletion within the working directory.
+- **[File Editing Tools](default_tools/file_editing/file_editing_tools.py)**: Complete file system operations including directory listing, text file reading/writing, content modification, keyword search, file deletion, and binary file reading within the working directory.
 
 ### **Knowledge Base Management** 
 - **[Knowledge Base Retrieval](default_tools/kb_repo_management/kb_repo_retrieval_tools.py)**: semantic search using OpenAI vector embeddings and FAISS indexing, and keyword search.
@@ -16,9 +16,6 @@ The following tools are included to give LLM agents the basic capabilities for f
 ### **Web Search & Browsing**
 - **[Open Deep Search](default_tools/open_deep_search/ods_tool.py)**: Advanced web search with result ranking and reranking capabilities using search engines and AI models.
 - **[Text Web Browser](default_tools/text_web_browser/text_web_browser.py)**: Full web browsing suite including page visits, downloads, archive search, navigation, and content finding.
-
-### **Document Processing**
-- **[Markdown to PDF Converter](default_tools/md2pdf/md2pdf_tool.py)**: Convert Markdown documents to PDF format with customizable styling and formatting options.
 
 ### **Image Processing**
 - **[Visual QA Tool](default_tools/visual_qa/visual_qa.py)**: Answer questions about images using vision-language models, supporting both local and remote image analysis.

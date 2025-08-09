@@ -55,56 +55,73 @@ def resize_image(image_path):
     return new_image_path
 
 
-@tool
-def visualizer(image_path: str, question: str | None = None) -> str:
-    """A tool that can answer questions about attached images.
 
-    Args:
-        image_path: The path to the image on which to answer the question. This should be a local path to downloaded image.
-        question: The question to answer.
-    """
-    import mimetypes
-    import os
-
-    import requests
-
-    # Use the encode_image function from this same module instead of relative import
-    # from .visual_qa import encode_image
-
-    add_note = False
-    if not question:
-        add_note = True
-        question = "Please write a detailed caption for this image."
-    if not isinstance(image_path, str):
-        raise Exception("You should provide at least `image_path` string argument to this tool!")
-
-    mime_type, _ = mimetypes.guess_type(image_path)
-    base64_image = encode_image(image_path)  # Use the function defined in this module
-
-    payload = {
-        "model": "gpt-4.1",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": question},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}},
-                ],
-            }
-        ],
-        "max_tokens": 1000,
+# Class-based visualizer tool with working_dir and safe path handling
+class Visualizer(Tool):
+    name = "visualizer"
+    description = (
+        "A tool that can answer questions about attached images using vision-language models. "
+        "Only images under the working directory are accessible."
+    )
+    inputs = {
+        "image_path": {"type": "string", "description": "Path to the image file."},
+        "question": {"type": "string", "description": "Question to answer about the image.", "nullable": True}
     }
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"}
-    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-    try:
-        output = response.json()["choices"][0]["message"]["content"]
-    except Exception:
-        raise Exception(f"Response format unexpected: {response.json()}")
+    output_type = "string"
 
-    if add_note:
-        output = f"You did not provide a particular question, so here is a detailed caption for the image: {output}"
+    def __init__(self, working_dir):
+        super().__init__()
+        self.working_dir = working_dir
 
-    return output
+    def forward(self, image_path: str, question: str = None) -> str:
+        try:
+            safe_image_path = self._safe_path(image_path)
+        except PermissionError as e:
+            return str(e)
+        if not os.path.exists(safe_image_path):
+            return f"The image file '{image_path}' does not exist."
+
+        add_note = False
+        if not question:
+            add_note = True
+            question = "Please write a detailed caption for this image."
+        if not isinstance(image_path, str):
+            return "You should provide at least `image_path` string argument to this tool!"
+
+        mime_type, _ = mimetypes.guess_type(safe_image_path)
+        base64_image = encode_image(safe_image_path)
+
+        payload = {
+            "model": "gpt-4.1",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}},
+                    ],
+                }
+            ],
+            "max_tokens": 1000,
+        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"}
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+        try:
+            output = response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return f"Response format unexpected: {response.json()}"
+
+        if add_note:
+            output = f"You did not provide a particular question, so here is a detailed caption for the image: {output}"
+
+        return output
+
+    def _safe_path(self, path: str) -> str:
+        abs_working_dir = os.path.abspath(self.working_dir)
+        abs_path = os.path.abspath(os.path.join(self.working_dir, path))
+        if not abs_path.startswith(abs_working_dir):
+            raise PermissionError("Access outside the working directory is not allowed.")
+        return abs_path
 
 
 if __name__ == "__main__":

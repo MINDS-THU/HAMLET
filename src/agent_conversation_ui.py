@@ -260,7 +260,7 @@ class GradioUI:
             return gr.Textbox(value="No file uploaded", visible=True), file_uploads_log
 
         if allowed_file_types is None:
-            allowed_file_types = [".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".py", ".md", ".csv", ".json", ".xlsx"]
+            allowed_file_types = [".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".py", ".md", ".csv", ".json", ".xlsx", ".html", ".xls", ".wav", ".mp3"]
 
         file_ext = os.path.splitext(file.name)[1].lower()
         if file_ext not in allowed_file_types:
@@ -280,12 +280,17 @@ class GradioUI:
 
     def log_user_message(self, text_input, file_uploads_log):
         import gradio as gr
+        # Show only relative paths under self.file_upload_folder
+        if self.file_upload_folder:
+            rel_paths = [os.path.relpath(f, self.file_upload_folder) for f in file_uploads_log]
+        else:
+            rel_paths = file_uploads_log
 
         return (
             text_input
             + (
-                f"\nYou have been provided with these files, which might be helpful or not: {file_uploads_log}"
-                if len(file_uploads_log) > 0
+                f"\nYou have been provided with these files, which might be helpful or not: {rel_paths}"
+                if len(rel_paths) > 0
                 else ""
             ),
             "",
