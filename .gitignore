@@ -4,3 +4,4 @@
 **/persistent_storage/
 **/index_dir/
 /.gradio/
+**/faiss_index
