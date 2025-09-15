@@ -5,3 +5,4 @@
 **/index_dir/**
 /.gradio/
 **/faiss_index
+**/test_outputs

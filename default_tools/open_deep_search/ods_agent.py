@@ -76,9 +76,11 @@ class OpenDeepSearchAgent:
         self.system_prompt = system_prompt
 
         # Configure LiteLLM with OpenAI base URL if provided
-        openai_base_url = os.environ.get("OPENAI_BASE_URL")
-        if openai_base_url:
-            utils.set_provider_config("openai", {"base_url": openai_base_url})
+        self.base_url = os.environ.get("OPENAI_BASE_URL")
+        self.api_key = os.environ.get("OPENAI_API_KEY")
+        if not self.base_url or not self.api_key:
+            raise ValueError("OPENAI_BASE_URL and OPENAI_API_KEY environment variables must be set.")
+        # utils.set_provider_config("openai", {"base_url": self.base_url})
 
     async def search_and_build_context(
         self,
@@ -146,12 +148,14 @@ class OpenDeepSearchAgent:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
         ]
-        # Get completion from LLM
+        # Get completion from LLM        
         response = completion(
             model=self.model,
             messages=messages,
             temperature=self.temperature,
-            top_p=self.top_p
+            top_p=self.top_p,
+            base_url=self.base_url,
+            api_key=self.api_key
         )
 
         return response.choices[0].message.content

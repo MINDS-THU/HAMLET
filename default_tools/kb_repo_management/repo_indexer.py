@@ -136,8 +136,23 @@ def chunk_file(path: Path) -> List[Dict[str, Any]]:
 # ─────────────────────────────── Embedding ──────────────────────────────────
 
 def embed_texts(texts: list[str], client, embed_model: str) -> np.ndarray:
-    resp = client.embeddings.create(model=embed_model, input=texts)
-    return np.asarray([d.embedding for d in resp.data], dtype="float32")
+    all_embeddings = []
+    batch_size = 512
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        try:
+            print(f'    [Embeddings] Sending batch of {len(batch)} chunks to API...')
+            resp = client.embeddings.create(model=embed_model, input=batch)
+            embeddings = np.asarray([d.embedding for d in resp.data], dtype='float32')
+            all_embeddings.append(embeddings)
+            print(f'    [Embeddings] Received batch successfully.')
+        except Exception as e:
+            print(f'    [Embeddings] ERROR during API call: {e}')
+            placeholder_embeddings = np.zeros((len(batch), 1536), dtype='float32')
+            all_embeddings.append(placeholder_embeddings)
+    if not all_embeddings:
+        return np.array([], dtype='float32')
+    return np.concatenate(all_embeddings)
 
 # ─────────────────────────────── Vector store ───────────────────────────────
 class FaissStore:
@@ -188,13 +203,24 @@ class RepoIndexer:
         index_dir: Path = None,
         embed_model: str = "text-embedding-3-small",
         openai_api_key: str = None,
+        openai_base_url: str = None,
+        client: 'Optional[OpenAI]' = None,
     ):
         self.root = Path(root)
         self.index_dir = index_dir or Path("vector_store")
         self.embed_model = embed_model
-        self.client = OpenAI(api_key=openai_api_key or os.getenv("OPENAI_API_KEY_EMBEDDINGS"))
         self._lock = threading.RLock()
-        dim = len(embed_texts(["probe"], self.client, self.embed_model)[0])
+        if client:
+            self.client = client
+        else:
+            self.client = OpenAI(api_key=openai_api_key or os.getenv("OPENAI_API_KEY_EMBEDDINGS"), base_url=openai_base_url, timeout=180.0)
+        try:
+            print('[RepoIndexer] Probing embedding dimension...')
+            dim = len(embed_texts(['probe'], self.client, self.embed_model)[0])
+            print(f'[RepoIndexer] Probe successful. Dimension is {dim}.')
+        except Exception as e:
+            dim = 1536
+            print(f"[RepoIndexer] WARNING: Could not probe embedding dimension, assuming {dim} for '{self.embed_model}'. Error: {e}")
         self.store = FaissStore(dim, self.index_dir, self.embed_model)
         self._sync_on_init()
         if watch:
@@ -216,10 +242,53 @@ class RepoIndexer:
             self.store.save()
 
     # ---------- sync ----------
+    def _sync_on_init(self):
+        with self._lock:
+            print('[RepoIndexer] Starting initial sync...')
+            existing_files_meta = {m['file']: m.get('sig') for m in self.store.meta.values()}
+            current_files_on_disk = {str(p.resolve()): _file_sig(p) for p in self.root.rglob('*.*') if chunk_file(p)}
+            files_to_remove = set(existing_files_meta.keys()) - set(current_files_on_disk.keys())
+            files_to_reindex = {path for path, sig in current_files_on_disk.items() if path not in existing_files_meta or existing_files_meta.get(path) != list(sig)}
+            print(f'[RepoIndexer] Found {len(files_to_remove)} files to remove from index.')
+            print(f'[RepoIndexer] Found {len(files_to_reindex)} files to update in index.')
+            if files_to_remove:
+                ids_to_remove = [id_ for id_, m in self.store.meta.items() if m['file'] in files_to_remove]
+                print(f'[RepoIndexer] Removing {len(ids_to_remove)} chunks for {len(files_to_remove)} deleted files.')
+                self.store.remove(ids_to_remove)
+            if files_to_reindex:
+                all_new_chunks = []
+                ids_to_remove_for_update = [id_ for id_, m in self.store.meta.items() if m['file'] in files_to_reindex]
+                print(f'[RepoIndexer] Removing {len(ids_to_remove_for_update)} old chunks for files to be updated.')
+                self.store.remove(ids_to_remove_for_update)
+                print('[RepoIndexer] Start chunking all modified files...')
+                for file_path_str in files_to_reindex:
+                    path = Path(file_path_str)
+                    print(f'  Chunking: {path.name}')
+                    file_chunks = chunk_file(path)
+                    sig = current_files_on_disk[file_path_str]
+                    for chunk in file_chunks:
+                        chunk['meta']['sig'] = sig
+                    all_new_chunks.extend(file_chunks)
+                print(f'[RepoIndexer] Total new chunks to process: {len(all_new_chunks)}')
+                if all_new_chunks:
+                    print('[RepoIndexer] Start embedding all new chunks...')
+                    chunk_contents = [c['content'] for c in all_new_chunks]
+                    vectors = embed_texts(chunk_contents, self.client, self.embed_model)
+                    if vectors.shape[0] == len(all_new_chunks):
+                        print('[RepoIndexer] Adding new vectors to FAISS index...')
+                        ids = [c['id'] for c in all_new_chunks]
+                        metas = [c['meta'] for c in all_new_chunks]
+                        self.store.add(ids, vectors, metas)
+                    else:
+                        print(f'[RepoIndexer] ERROR: Mismatch between number of chunks ({len(all_new_chunks)}) and number of vectors ({vectors.shape[0]}). Aborting add.')
+            print('[RepoIndexer] Saving index to disk...')
+            self.store.save()
+            print('[RepoIndexer] Sync complete.')
+
     # def _sync_on_init(self):
     #     with self._lock:
     #         existing_files = {m["file"] for m in self.store.meta.values()}
-    #         current_files = {str(p) for p in self.root.rglob("*.*")}
+    #         current_files = {str(p.resolve()) for p in self.root.rglob("*.*")}
     #         for dead in existing_files - current_files:
     #             self._delete_file(Path(dead))
     #         for p_str in current_files:
@@ -233,24 +302,6 @@ class RepoIndexer:
     #             if sig_in_meta != sig:
     #                 self._reindex_file(p, sig)
     #         self.store.save()
-
-    def _sync_on_init(self):
-        with self._lock:
-            existing_files = {m["file"] for m in self.store.meta.values()}
-            current_files = {str(p.resolve()) for p in self.root.rglob("*.*")}
-            for dead in existing_files - current_files:
-                self._delete_file(Path(dead))
-            for p_str in current_files:
-                p = Path(p_str)
-                sig = _file_sig(p)
-                sig_in_meta: Optional[tuple[int, int]] = None
-                for m in self.store.meta.values():
-                    if m["file"] == p_str:
-                        sig_in_meta = tuple(m.get("sig", ())) or None
-                        break
-                if sig_in_meta != sig:
-                    self._reindex_file(p, sig)
-            self.store.save()
 
     # ---------- helpers ----------
     # def _reindex_file(self, path: Path, sig: Optional[tuple[int, int]] = None):
