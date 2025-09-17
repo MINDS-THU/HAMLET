@@ -1,5 +1,5 @@
 google_search_results==2.4.2
-huggingface_hub==0.31.2
+huggingface_hub>=0.31.2
 Jinja2==3.1.6
 langchain==0.3.25
 langchain_text_splitters==0.3.8
@@ -40,3 +40,4 @@ openpyxl==3.1.5
 wikipedia-api==0.8.1
 transformers==4.55.0
 markitdown[all]==0.1.2
+litellm==1.77.0
