@@ -70,7 +70,7 @@ class OpenDeepSearchAgent:
         self.source_processor = SourceProcessor(**source_processor_config)
 
         # Initialize LLM settings
-        self.model = model if model is not None else os.getenv("LITELLM_SEARCH_MODEL_ID", os.getenv("LITELLM_MODEL_ID", "openrouter/google/gemini-2.0-flash-001"))
+        self.model = model if model is not None else os.getenv("LITELLM_SEARCH_MODEL_ID", os.getenv("LITELLM_MODEL_ID", "gpt-5"))
         self.temperature = temperature
         self.top_p = top_p
         self.system_prompt = system_prompt
@@ -122,7 +122,7 @@ class OpenDeepSearchAgent:
     async def ask(
         self,
         query: str,
-        max_sources: int = 2,
+        max_sources: int = 1,
         pro_mode: bool = False,
     ) -> str:
         """
@@ -148,15 +148,23 @@ class OpenDeepSearchAgent:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
         ]
-        # Get completion from LLM        
-        response = completion(
-            model=self.model,
-            messages=messages,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            base_url=self.base_url,
-            api_key=self.api_key
-        )
+        # Get completion from LLM
+        if "gpt-5" in self.model:
+            response = completion(
+                model=self.model,
+                messages=messages,
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
+        else:
+            response = completion(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
 
         return response.choices[0].message.content
 

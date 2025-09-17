@@ -15,8 +15,8 @@ from serpapi import GoogleSearch
 
 from smolagents import Tool
 
-from .cookies import COOKIES
-from .mdconvert import FileConversionException, MarkdownConverter, UnsupportedFormatException
+from default_tools.text_web_browser.cookies import COOKIES
+from default_tools.text_web_browser.mdconvert import FileConversionException, MarkdownConverter, UnsupportedFormatException
 
 
 class SimpleTextBrowser:

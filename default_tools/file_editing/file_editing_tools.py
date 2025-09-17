@@ -17,7 +17,7 @@ class ListDir(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, directory: str) -> str:
+    def forward(self, directory: str) -> Any:
         try:
             chosen_dir = self._safe_path(directory)
         except PermissionError as e:
@@ -53,7 +53,7 @@ class SeeTextFile(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, filename: str) -> str:
+    def forward(self, filename: str) -> Any:
         try:
             filepath = self._safe_path(filename)
         except PermissionError as e:
@@ -89,7 +89,7 @@ class ReadBinaryAsMarkdown(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, filename: str) -> str:
+    def forward(self, filename: str) -> Any:
         try:
             filepath = self._safe_path(filename)
         except PermissionError as e:
@@ -132,7 +132,7 @@ class ModifyFile(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, filename: str, start_line: int, end_line: int, new_content: str) -> str:
+    def forward(self, filename: str, start_line: int, end_line: int, new_content: str) -> Any:
         try:
             filepath = self._safe_path(filename)
         except PermissionError as e:
@@ -159,6 +159,7 @@ class CreateFileWithContent(Tool):
     name = "create_file_with_content"
     description = (
         "Create a new plain text file (e.g., .txt, .py, .md) and write content into it. "
+        "If parent folders in the specified path do not exist, they will be created automatically. "
         "This tool does not support creating binary files such as .pdf, .docx, or images."
     )
     inputs = {
@@ -171,13 +172,25 @@ class CreateFileWithContent(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, filename: str, content: str) -> str:
+    def forward(self, filename: str, content: str) -> Any:
         try:
             filepath = self._safe_path(filename)
         except PermissionError as e:
             return str(e)
-        with open(filepath, "w", encoding="utf-8") as file:
-            file.write(content)
+
+        # Ensure parent directories exist (but remain within working_dir)
+        parent_dir = os.path.dirname(filepath)
+        if parent_dir and not os.path.exists(parent_dir):
+            try:
+                os.makedirs(parent_dir, exist_ok=True)
+            except Exception as e:
+                return f"Failed to create parent directories for '{filename}': {e}"
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as file:
+                file.write(content)
+        except Exception as e:
+            return f"Failed to create or write file '{filename}': {e}"
         return "File created successfully."
 
     def _safe_path(self, path: str) -> str:
@@ -209,7 +222,7 @@ class SearchKeyword(Tool):
         super().__init__()
         self.working_dir = working_dir
 
-    def forward(self, path: str, keyword: str, context_lines: int) -> str:
+    def forward(self, path: str, keyword: str, context_lines: int) -> Any:
         try:
             target_path = self._safe_path(path)
         except PermissionError as e:
@@ -281,7 +294,7 @@ class DeleteFileOrFolder(Tool):
         super().__init__()
         self.working_dir = working_dir
     
-    def forward(self, filename: str) -> str:
+    def forward(self, filename: str) -> Any:
         if filename == "":
             abs_working_dir = os.path.abspath(self.working_dir)
             # Only delete inside the working directory

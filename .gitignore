@@ -6,3 +6,5 @@
 /.gradio/
 **/faiss_index
 **/test_outputs
+**/temp_files
+**/downloads

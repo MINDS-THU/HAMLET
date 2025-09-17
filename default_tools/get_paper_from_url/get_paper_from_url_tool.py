@@ -8,8 +8,9 @@ from smolagents import Tool
 import os
 from typing import Optional, List
 
-def remove_irrelevant_sections(text):
-    # Lowercased and normalized version of common section headings to remove
+
+def remove_irrelevant_sections(text: str) -> str:
+    """Cut content at first occurrence of terminal sections (references, appendix, etc.)."""
     heading_max_chars = 120
     stop_headings = (
         "references",
@@ -20,24 +21,20 @@ def remove_irrelevant_sections(text):
         "appendix",
         "supplementary material",
         "supplementary materials",
-        "supplementary")
+        "supplementary",
+    )
     pattern = re.compile(
-        rf"^\s*(\d+\s*[\.\-–])?\s*"
-        rf"(?:{'|'.join(stop_headings)})"
-        rf"\b.*$",               # heading text to end‑of‑line
-        re.IGNORECASE | re.MULTILINE
-        )
-
-    # Find the first heading line satisfying length ≤ heading_max_chars
-    match_iter = pattern.finditer(text)
-    cut_pos = None
-    for m in match_iter:
+        rf"^\s*(\d+\s*[\.\-–])?\s*(?:{'|'.join(stop_headings)})\b.*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    cut_pos: Optional[int] = None
+    for m in pattern.finditer(text):
         line = m.group(0)
         if len(line) <= heading_max_chars:
             cut_pos = m.start()
             break
-
     return text[:cut_pos].rstrip() if cut_pos is not None else text
+
 
 # --- Abstract extraction helpers ---
 _ABSTRACT_INLINE_RE = re.compile(r"^\s*abstract\s*[:\.]?\s*(.+)$", re.IGNORECASE)
@@ -57,11 +54,9 @@ def _is_section_heading(line: str) -> bool:
 
 
 def _clean_join(lines: List[str]) -> str:
-    """Join lines into a paragraph, fixing common hyphenation splits like 'ap- plication'."""
+    """Join lines into a paragraph, fixing common hyphenation and whitespace."""
     text = " ".join(l.strip() for l in lines if l is not None)
-    # Fix hyphenation across line breaks that became '- ' patterns
-    text = re.sub(r"(\w)-(\s+)(\w)", r"\1\3", text)
-    # Collapse excessive whitespace
+    text = re.sub(r"(\w)-(\s+)(\w)", r"\1\3", text)  # fix split words like "ap- plication"
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text
 
@@ -69,7 +64,7 @@ def _clean_join(lines: List[str]) -> str:
 def extract_abstract_from_text(text: str) -> Optional[str]:
     lines = text.splitlines()
     n = len(lines)
-    # Pass 1: look for inline abstract (same line)
+    # Pass 1: inline abstract
     for i, raw in enumerate(lines):
         m = _ABSTRACT_INLINE_RE.match(raw)
         if m:
@@ -85,11 +80,10 @@ def extract_abstract_from_text(text: str) -> Optional[str]:
                     break
                 content.append(l)
             return _clean_join(content) if content else None
-
-    # Pass 2: heading-only 'Abstract' line, then collect following paragraph(s)
+    # Pass 2: heading-only then following paragraph(s)
     for i, raw in enumerate(lines):
         if _ABSTRACT_HEADING_ONLY_RE.match(raw):
-            content: list[str] = []
+            content: List[str] = []
             for j in range(i + 1, n):
                 l = lines[j].strip()
                 if not l:
@@ -102,61 +96,132 @@ def extract_abstract_from_text(text: str) -> Optional[str]:
                 content.append(l)
             if content:
                 return _clean_join(content)
-            # continue searching in case this 'Abstract' was decorative
     return None
 
-def extract_docs_from_urls(urls):
-    """Extract documents from URLs and convert to Document objects"""
-    pdf_links = [link for link in urls if 'pdf' in link]
-    web_links = [link for link in urls if 'pdf' not in link]
-    
-    docs = []
-    
-    # Process web pages
-    if web_links:
-        html_docs = SeleniumURLLoader(urls=web_links).load()
-        docs.extend(html_docs)
-        
-    # Process PDFs
-    for link in pdf_links:
-        text = remove_irrelevant_sections(extract_text_from_pdf_url(link))
-        if text:
-            docs.append(Document(page_content=text, metadata={"source": link}))
-            
-    return docs
 
-def extract_text_from_pdf_url(url):
+# --- Title extraction helpers ---
+_TITLE_NOISE_RE = re.compile(
+    r"^(arXiv:|submitted\s+on|preprint|doi\b|copyright|university\b|figure\s+\d+|proceedings\b)",
+    re.IGNORECASE,
+)
+
+_TRAILING_SITE_SUFFIXES = (
+    " - arXiv",
+    " | arXiv",
+    " - arXiv.org",
+    " - PMC",
+    " | PMC",
+    " - PubMed Central",
+    " - ScienceDirect",
+    " | ScienceDirect",
+    " - SpringerLink",
+    " | SpringerLink",
+    " - ACM Digital Library",
+    " | ACM Digital Library",
+)
+
+
+def _clean_title_suffix(title: str) -> str:
+    t = title.strip()
+    for suf in _TRAILING_SITE_SUFFIXES:
+        if t.endswith(suf):
+            t = t[: -len(suf)].rstrip()
+    return re.sub(r"\s{2,}", " ", t)
+
+
+def _alpha_ratio(s: str) -> float:
+    letters = sum(c.isalpha() for c in s)
+    return letters / max(1, len(s))
+
+
+def extract_title_from_content(text: str) -> Optional[str]:
+    """Heuristically pick a plausible title line before Abstract or within first ~60 lines."""
+    lines = [ln.strip() for ln in text.splitlines()[:200]]
+    abs_idx = None
+    for i, ln in enumerate(lines):
+        if _ABSTRACT_HEADING_ONLY_RE.match(ln) or _ABSTRACT_INLINE_RE.match(ln):
+            abs_idx = i
+            break
+    search_until = abs_idx if abs_idx is not None else min(len(lines), 60)
+    candidates: List[str] = []
+    for ln in lines[:search_until]:
+        if not ln:
+            continue
+        if _TITLE_NOISE_RE.match(ln):
+            continue
+        if 8 <= len(ln) <= 180 and _alpha_ratio(ln) >= 0.5:
+            candidates.append(ln)
+    if candidates:
+        best = max(candidates, key=len)
+        return _clean_title_suffix(best)
+    return None
+
+
+def extract_text_from_pdf_url(url: str, return_title: bool = False):
     try:
         response = requests.get(url)
         response.raise_for_status()
         with fitz.open(stream=response.content, filetype="pdf") as doc:
-            return "\n".join(page.get_text("text") for page in doc)  # type: ignore[attr-defined]
+            text = "\n".join(page.get_text("text") for page in doc)  # type: ignore[attr-defined]
+            if return_title:
+                try:
+                    meta_title = (doc.metadata or {}).get("title")
+                except Exception:
+                    meta_title = None
+                return text, meta_title
+            return text
     except HTTPError as http_err:
         status = getattr(getattr(http_err, 'response', None), 'status_code', 'unknown')
         print(f"HTTP error occurred: {http_err} (Status code: {status})")
-        return ""
+        return ("", None) if return_title else ""
     except Exception as err:
         print(f"Other error occurred: {err}")
-        return ""
+        return ("", None) if return_title else ""
+
+
+def extract_docs_from_urls(urls: List[str]) -> List[Document]:
+    """Extract documents from URLs and convert to Document objects."""
+    pdf_links = [link for link in urls if 'pdf' in link]
+    web_links = [link for link in urls if 'pdf' not in link]
+
+    docs: List[Document] = []
+
+    # Process web pages
+    if web_links:
+        html_docs = SeleniumURLLoader(urls=web_links).load()
+        docs.extend(html_docs)
+
+    # Process PDFs (capture metadata title when available)
+    for link in pdf_links:
+        text, meta_title = extract_text_from_pdf_url(link, return_title=True)
+        text = remove_irrelevant_sections(text)
+        if text:
+            meta = {"source": link}
+            if meta_title and meta_title.strip():
+                meta["title"] = meta_title.strip()
+            docs.append(Document(page_content=text, metadata=meta))
+
+    return docs
+
 
 class GetPaperFromURL(Tool):
     name = "get_paper_from_url"
     description = (
-        "Fetch research papers from a list of URLs, extract their content, save each paper as a text file, and return a summary string for each document including its title, abstract, and the filename used."
+        "Fetch research papers from a list of URLs, extract their content, save each paper as a Markdown (.md) file, and return a summary string for each document including its title, abstract, and the saved filename."
     )
     inputs = {
-        "urls": {"type": "any", "description": "List of URLs to fetch papers from."}
+        "urls": {
+            "type": "any",
+            "description": "List of paper URLs to fetch. Example: ['https://arxiv.org/abs/2401.12345','https://openreview.net/pdf?id=abc123','https://proceedings.mlr.press/v123/paper.pdf']",
+        }
     }
     output_type = "string"
 
-    def __init__(self, working_dir):
+    def __init__(self, working_dir: str):
         super().__init__()
         self.working_dir = working_dir
 
     def forward(self, urls: list) -> str:  # type: ignore[override]
-        # use extract_docs_from_urls to get Document objects
-        # then save each to a text file in working_dir
-        # return a summary string for each situation
         if not urls:
             return "No URLs provided."
         try:
@@ -164,26 +229,34 @@ class GetPaperFromURL(Tool):
             if not docs:
                 return "No valid documents found at the provided URLs."
 
-            # save each document to a text file
-            # in the end, return a summary string of the fetched documents,
-            # including their titles, abstract, and safe_filenames
-            summary_lines = []
+            summary_lines: List[str] = []
             for doc in docs:
-                title = doc.metadata.get('title')
-                # Fallback logic for missing title in doc metadata
-                if not title or not title.strip():
-                    # Try to use first non-empty line of content
+                meta = doc.metadata or {}
+                title = (meta.get('title') or '').strip()
+                # Heuristic cleanup/guess when title is missing or noisy
+                noisy = (not title) or title.lower().startswith('arxiv:') or title.lower() in {
+                    'sciencedirect', 'researchgate - temporarily unavailable'
+                }
+                if noisy:
+                    guessed = extract_title_from_content(doc.page_content)
+                    if guessed:
+                        title = guessed
+                if not title:
+                    # Final fallback: first non-empty line
                     for line in doc.page_content.splitlines():
                         if line.strip():
                             title = line.strip()
                             break
-                    else:
+                    if not title:
                         title = 'Untitled Document'
-                filename = re.sub(r'\W+', '_', title).lower() + '.md'
+                # Clean common site suffixes
+                title = _clean_title_suffix(title)
+
+                filename = re.sub(r"\W+", "_", title).lower() + ".md"
                 safe_filename = self._safe_path(filename)
                 # Compose simple Markdown: H1 title, source link (if any), then content
                 md_lines = [f"# {title}"]
-                source = doc.metadata.get('source') or doc.metadata.get('url')
+                source = meta.get('source') or meta.get('url')
                 if source:
                     md_lines.append("")
                     md_lines.append(f"Source: {source}")
@@ -195,15 +268,24 @@ class GetPaperFromURL(Tool):
                 # Extract abstract using robust parser
                 abstract = extract_abstract_from_text(doc.page_content)
                 if not abstract:
-                    # Fallback: take the first 120–200 words before 'Introduction'
+                    # Fallback: take the first ~250 words before 'Introduction'
                     pre_intro = re.split(r"\n\s*(?:\d+\s*[\.-–])?\s*Introduction\b", doc.page_content, flags=re.IGNORECASE)[0]
                     words = re.findall(r"\S+", pre_intro)
-                    abstract = " ".join(words[:180]).strip() if words else '(No abstract found)'
+                    abstract = " ".join(words[:250]).strip() if words else '(No abstract found)'
+                else:
+                    # If the abstract is extremely short, append a bit more context after it
+                    if len(abstract) < 120:
+                        tail = re.split(r"\n\s*(?:\d+\s*[\.-–])?\s*Introduction\b", doc.page_content, flags=re.IGNORECASE)[0]
+                        extra_words = re.findall(r"\S+", tail)
+                        if extra_words:
+                            abstract = (abstract + " " + " ".join(extra_words[:120])).strip()
                 # Length sanity: trim overly long abstracts
                 if len(abstract) > 3000:
                     abstract = abstract[:3000].rstrip() + " …"
 
-                summary_lines.append(f"Title: {title}\nAbstract: {abstract}\nSaved as: {os.path.basename(safe_filename)}\n")
+                summary_lines.append(
+                    f"Title: {title}\nAbstract: {abstract}\nSaved as: {os.path.basename(safe_filename)}\n"
+                )
 
             return "\n---\n".join(summary_lines)
         except Exception as e:
@@ -221,10 +303,7 @@ class GetPaperFromURL(Tool):
 if __name__ == "__main__":
     # Test GetPaperFromURL tool with example URLs
     urls = [
-        "https://arxiv.org/html/2412.10400v1",
-        "https://openreview.net/forum?id=inpkC8UrDu",
-        "https://raw.githubusercontent.com/mlresearch/v258/main/assets/zhang25d/zhang25d.pdf",
-        "https://arxiv.org/html/2306.04891v2",
+        "https://zenodo.org/records/15042478/files/PhD-Thesis-LukasJohannesBreitwieser.pdf?download=1",
     ]
     working_dir = os.path.join(os.path.dirname(__file__), "test_outputs")
     os.makedirs(working_dir, exist_ok=True)

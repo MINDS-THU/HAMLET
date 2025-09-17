@@ -73,14 +73,19 @@ class InfinitySemanticSearcher(BaseSemanticSearcher):
             for text in texts
         ]
 
-        response = requests.post(
-            self.embedding_endpoint,
-            json={
-                "model": self.model_name,
-                "input": formatted_texts
-            }
-        )
-        
-        content_str = response.content.decode('utf-8')
-        content_json = json.loads(content_str)
-        return torch.tensor([item['embedding'] for item in content_json['data']])
+        try:
+            response = requests.post(
+                self.embedding_endpoint,
+                json={
+                    "model": self.model_name,
+                    "input": formatted_texts
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            content_str = response.content.decode('utf-8')
+            content_json = json.loads(content_str)
+            return torch.tensor([item['embedding'] for item in content_json['data']])
+        except Exception as e:
+            # Propagate a clear error so callers can gracefully skip reranking
+            raise RuntimeError(f"Infinity embedding request failed or timed out: {e}")
