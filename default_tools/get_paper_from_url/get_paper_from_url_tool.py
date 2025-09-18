@@ -1,5 +1,4 @@
 from langchain.docstore.document import Document
-from langchain_community.document_loaders import SeleniumURLLoader
 import requests
 import fitz  # PyMuPDF
 from requests.exceptions import HTTPError
@@ -7,6 +6,21 @@ import re
 from smolagents import Tool
 import os
 from typing import Optional, List
+from bs4 import BeautifulSoup  # HTML text extraction fallback
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Optional Selenium imports (not required if unavailable)
+try:  # pragma: no cover - optional path
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.chrome.service import Service as ChromeService
+    _SELENIUM_AVAILABLE = True
+except Exception:  # pragma: no cover - optional path
+    _SELENIUM_AVAILABLE = False
+    webdriver = None  # type: ignore[assignment]
+    ChromeOptions = None  # type: ignore[assignment]
+    ChromeService = None  # type: ignore[assignment]
 
 
 def remove_irrelevant_sections(text: str) -> str:
@@ -159,7 +173,8 @@ def extract_title_from_content(text: str) -> Optional[str]:
 
 def extract_text_from_pdf_url(url: str, return_title: bool = False):
     try:
-        response = requests.get(url)
+        session = _get_requests_session()
+        response = session.get(url, timeout=(10, 60))  # connect, read timeouts
         response.raise_for_status()
         with fitz.open(stream=response.content, filetype="pdf") as doc:
             text = "\n".join(page.get_text("text") for page in doc)  # type: ignore[attr-defined]
@@ -179,17 +194,166 @@ def extract_text_from_pdf_url(url: str, return_title: bool = False):
         return ("", None) if return_title else ""
 
 
+def _get_requests_session() -> requests.Session:
+    """Create a requests session with retry/backoff and proxy support via env vars.
+
+    Requests uses HTTP(S)_PROXY env vars automatically; we mainly add retries and timeouts.
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=0.6,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET", "POST", "HEAD"),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=10)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    # Optional default headers (user agent helps with some CDNs)
+    ua = os.environ.get(
+        "HAMLET_USER_AGENT",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36",
+    )
+    session.headers.update({
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    return session
+
+
+def _env_truthy(key: str, default: bool) -> bool:
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _extract_text_from_html(html: str) -> str:
+    """Extract visible text from HTML with basic cleanup."""
+    soup = BeautifulSoup(html, "html.parser")
+    # Remove script/style
+    for tag in soup(["script", "style", "noscript"]):
+        tag.extract()
+    text = soup.get_text("\n")
+    # Normalize whitespace
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"(\n\s*)+", "\n", text)
+    return text.strip()
+
+
+def _load_web_docs_via_requests(urls: List[str]) -> List[Document]:
+    session = _get_requests_session()
+    docs: List[Document] = []
+    for url in urls:
+        try:
+            resp = session.get(url, timeout=(10, 60))
+            if resp.status_code >= 400:
+                continue
+            html = resp.text
+            text = _extract_text_from_html(html) if html else ""
+            if text:
+                docs.append(Document(page_content=text, metadata={"source": url}))
+        except Exception:
+            # Silently skip; Selenium path may handle it
+            continue
+    return docs
+
+
+def _load_web_docs_via_selenium(urls: List[str]) -> List[Document]:  # pragma: no cover - I/O heavy
+    try:
+        from selenium import webdriver as _webdriver
+        from selenium.webdriver.chrome.options import Options as _ChromeOptions
+        from selenium.webdriver.chrome.service import Service as _ChromeService
+    except Exception:
+        return []
+
+    headless = _env_truthy("HAMLET_SELENIUM_HEADLESS", True)
+    proxy = os.environ.get("HAMLET_SELENIUM_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    chromedriver_path = os.environ.get("HAMLET_CHROMEDRIVER_PATH")
+    user_agent = os.environ.get(
+        "HAMLET_USER_AGENT",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36",
+    )
+    quiet_logs = _env_truthy("HAMLET_SELENIUM_QUIET", True)
+
+    options = _ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument(f"--user-agent={user_agent}")
+    if quiet_logs:
+        options.add_argument("--log-level=3")
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])  # hides many USB/device logs
+    if proxy:
+        options.add_argument(f"--proxy-server={proxy}")
+
+    # Build service; prefer user-specified driver
+    try:
+        if chromedriver_path:
+            service = _ChromeService(executable_path=chromedriver_path)
+        else:
+            service = _ChromeService()
+    except Exception:
+        service = None  # type: ignore[assignment]
+
+    driver = None
+    try:
+        driver = _webdriver.Chrome(options=options, service=service) if service else _webdriver.Chrome(options=options)
+        docs: List[Document] = []
+        for url in urls:
+            try:
+                driver.get(url)
+                try:
+                    driver.implicitly_wait(2)
+                except Exception:
+                    pass
+                title = (driver.title or "").strip()
+                page_source = driver.page_source or ""
+                text = _extract_text_from_html(page_source) if page_source else ""
+                meta = {"source": url}
+                if title:
+                    meta["title"] = title
+                if text:
+                    docs.append(Document(page_content=text, metadata=meta))
+            except Exception:
+                continue
+        return docs
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
 def extract_docs_from_urls(urls: List[str]) -> List[Document]:
-    """Extract documents from URLs and convert to Document objects."""
-    pdf_links = [link for link in urls if 'pdf' in link]
-    web_links = [link for link in urls if 'pdf' not in link]
+    """Extract documents from URLs and convert to Document objects.
+
+    - PDFs: fetched via requests with retry/timeout, parsed by PyMuPDF.
+    - HTML: try Selenium (if available) with headless, proxy, and quiet-logs options; otherwise fall back to requests+BS4.
+    """
+    pdf_links = [link for link in urls if 'pdf' in link.lower()]
+    web_links = [link for link in urls if 'pdf' not in link.lower()]
 
     docs: List[Document] = []
 
     # Process web pages
     if web_links:
-        html_docs = SeleniumURLLoader(urls=web_links).load()
-        docs.extend(html_docs)
+        web_docs: List[Document] = []
+        use_selenium = _env_truthy("HAMLET_USE_SELENIUM", True)
+        if use_selenium and _SELENIUM_AVAILABLE:
+            web_docs = _load_web_docs_via_selenium(web_links)
+        if not web_docs:
+            # Fallback to requests-only path
+            web_docs = _load_web_docs_via_requests(web_links)
+        docs.extend(web_docs)
 
     # Process PDFs (capture metadata title when available)
     for link in pdf_links:

@@ -169,39 +169,39 @@ def blank_lines_around_list_items(md: str) -> str:
 
     return "\n".join(out)
 
-def write_report(query: str, working_directory: str, model: LiteLLMModel, max_retries: int = 3):
-    # print("===== First stage: paper search =====")
-    # paper_search_agent = create_paper_search_agent(
-    #     working_directory=os.path.join(working_directory, "relevant_papers"),
-    #     model=model,
-    #     max_steps=5,
-    #     verbosity_level=LogLevel.DEBUG,
-    # )
-    # paper_summary = paper_search_agent.run(query).to_string()
+def write_report(query: str, working_directory: str, search_agent_model: LiteLLMModel, writing_agent_model: LiteLLMModel, max_retries: int = 3, min_papers: int = 5):
+    print("===== First stage: paper search =====")
+    paper_search_agent = create_paper_search_agent(
+        working_directory=os.path.join(working_directory, "relevant_papers"),
+        model=search_agent_model,
+        max_steps=5,
+        verbosity_level=LogLevel.DEBUG,
+    )
+    paper_summary = paper_search_agent.run(query).to_string()
 
-    # paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
+    paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
 
-    # retries = 0
-    # while len(paper_md_list) == 0 and retries < max_retries:
-    #     print("No markdown files found in paper search agent report.")
-    #     print("Ask paper search agent to retrieve paper content based on history.")
-    #     paper_summary = paper_search_agent.run("No markdown files were found in the working directory. Most likely reason was that you did not call get_paper_from_url or the calls failed. Please try to retrieve paper content from the URLs you have found so far without any further search.", reset=False).to_string()
-    #     paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
-    #     retries += 1
+    retries = 0
+    while len(paper_md_list) < min_papers and retries < max_retries:
+        print("Not enough markdown files found in paper search agent report. Minimum required to write a comprehensive report:", min_papers)
+        print("Ask paper search agent to retrieve paper content based on history.")
+        paper_summary = paper_search_agent.run(f"Not enough markdown files were found in the working directory. Most likely reason was that you did not call get_paper_from_url, the calls failed, or the selected number of URLs were not enough (minimum: {min_papers}). Please try to retrieve enough number of papers from the URLs you have found so far without any further search.", reset=False).to_string()
+        paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
+        retries += 1
 
-    # print(f"Extracted {len(paper_md_list)} markdown files from paper search agent report.")
-    # print(paper_md_list)
-    # print("===== Second stage: literature survey writing =====")
-    # writing_agent, survey_writing_agent = create_survey_writing_agent(model=LiteLLMModel(model_id="gpt-4.1"), output_dir=working_directory)
+    print(f"Extracted {len(paper_md_list)} markdown files from paper search agent report.")
+    print(paper_md_list)
+    print("===== Second stage: literature survey writing =====")
+    writing_agent, survey_writing_agent = create_survey_writing_agent(model=writing_agent_model, output_dir=working_directory)
 
-    # for i,full_path in enumerate(paper_md_list):
-    #     with open(full_path, "r", encoding="utf-8") as f:
-    #         content = f.read()
-    #     writing_agent(f"""Read the following paper and write a concise but comprehensive summary in markdown format (MODE=PER_PAPER). Name of the resulting markdown file should start with index {i+1}. \n{content}
-    #                       """, reset=True)
-    # # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe writing_agent has already generated summary for each paper under the working directory. What you need to do now is just reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.") 
-    # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}. \nThe writing_agent has already generated summary for each of these papers under the working directory. What you need to do now is reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.")        
-    # # # survey_writing_agent.run(f"Write a literature survey on current research on {query}. Your audience will be students and researchers in the relevant fields. Be sure to include technical details and references to the literature.\nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}.\nYour should write a comprehensive literature survey based on these papers. You must include detailed descriptions and analyses of each paper in your literature survey.")
+    for i,full_path in enumerate(paper_md_list):
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        writing_agent(f"""Read the following paper and write a concise but comprehensive summary in markdown format (MODE=PER_PAPER). Name of the resulting markdown file should start with index {i+1}. \n{content}
+                          """, reset=True)
+    # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe writing_agent has already generated summary for each paper under the working directory. What you need to do now is just reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.") 
+    survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}. \nThe writing_agent has already generated summary for each of these papers under the working directory. What you need to do now is reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.")        
+    # # survey_writing_agent.run(f"Write a literature survey on current research on {query}. Your audience will be students and researchers in the relevant fields. Be sure to include technical details and references to the literature.\nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}.\nYour should write a comprehensive literature survey based on these papers. You must include detailed descriptions and analyses of each paper in your literature survey.")
 
     print("===== Third stage: compile the report =====")
     # combine all .md files under working_directory into a single .md file
@@ -237,13 +237,15 @@ def write_report(query: str, working_directory: str, model: LiteLLMModel, max_re
 if __name__ == "__main__":
     base_temp_dir = "literature_survey_app/temp_files"
     Path(base_temp_dir).mkdir(parents=True, exist_ok=True)
-    working_directory = "literature_survey_app/temp_files/working_directory_prdgxpt8"
+    working_directory = None
     if working_directory is None:
         working_directory = tempfile.mkdtemp(dir=base_temp_dir, prefix="working_directory_")
     print(f"Using working directory: {working_directory}")
-    model = LiteLLMModel(model_id="gpt-5", api_base=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY"))
+    search_agent_model = LiteLLMModel(model_id="gpt-5", api_base=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY"))
+    writing_agent_model = LiteLLMModel(model_id="gpt-4.1", api_base=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY"))
     write_report(
         query="current research on meta-heuristic methods enhanced by large language models",
         working_directory=working_directory,
-        model=model
+        search_agent_model=search_agent_model,
+        writing_agent_model=writing_agent_model
     )
