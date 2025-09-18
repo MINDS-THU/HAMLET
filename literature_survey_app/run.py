@@ -1,3 +1,4 @@
+from glob import glob
 from anyio import Path
 from literature_survey_app.paper_search_agent import create_paper_search_agent
 from literature_survey_app.survey_writing_agent import create_survey_writing_agent
@@ -5,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import re
+import chardet
 from typing import List
 from smolagents import LogLevel
 from src.models import LiteLLMModel
@@ -15,6 +17,19 @@ from literature_survey_app.utils import (
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
+
+
+LIST_MARKER_RE = re.compile(
+    r""" ^\s{0,3}               # optional indent (≤ 3 spaces)
+         (?:                    # list marker alternatives
+             [-+*]              #   • unordered: -, +, *
+           | \d+[.)]            #   • ordered:   1.   1)
+           | \[\d+\]            #   • ordered:   [1]  [23]
+         )
+         \s+                    # at least one space after the marker
+    """,
+    re.VERBOSE,
+)
 
 def extract_markdown_paths(report_text: str, dedupe: bool = True) -> List[str]:
     """
@@ -107,56 +122,122 @@ def extract_markdown_paths(report_text: str, dedupe: bool = True) -> List[str]:
 
     return results
 
-def write_report(query: str, working_directory: str, model: LiteLLMModel):
-    print("===== First stage: paper search =====")
-    paper_search_agent = create_paper_search_agent(
-        working_directory=os.path.join(working_directory, "relevant_papers"),
-        model=model,
-        max_steps=5,
-        verbosity_level=LogLevel.DEBUG,
-    )
-    paper_summary = paper_search_agent.run(query).to_string()
-    paper_md_list = extract_markdown_paths(paper_summary)
+def _read_file_utf8_safe(path: str) -> str:
+    """Read any text file as UTF-8, falling back to detected encoding if needed."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError:
+        # Try to detect encoding
+        with open(path, "rb") as f:
+            raw = f.read()
+        import chardet
+        enc = chardet.detect(raw)["encoding"] or "utf-8"
+        return raw.decode(enc, errors="replace")
 
-    if paper_md_list is None or len(paper_md_list) == 0:
-        # find all .md files under os.path.join(working_directory, "relevant_papers")
-        paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
-    else:
-        # convert the ./XXX.md in paper_summary to full path
-        # need to remove ./ prefix
-        paper_md_list = [os.path.join(working_directory, "relevant_papers", p[2:]) if p.startswith("./") else os.path.join(working_directory, "relevant_papers", p) for p in paper_md_list]
-    print(f"Extracted {len(paper_md_list)} markdown files from paper search agent report.")
-    print(paper_md_list)
-    print("===== Second stage: literature survey writing =====")
-    writing_agent, survey_writing_agent = create_survey_writing_agent(model=LiteLLMModel(model_id="gpt-4.1"), output_dir=working_directory)
+def blank_lines_around_list_items(md: str) -> str:
+    """
+    Ensure every list item has *exactly one* blank line before it,
+    between it and the next item, and after the last item in the list.
+    """
+    lines = md.splitlines()
+    out   = []
+    i     = 0
 
-    for i,full_path in enumerate(paper_md_list):
-        with open(full_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        writing_agent(f"""Read the following paper and write a concise but comprehensive summary in markdown format (MODE=PER_PAPER). Name of the resulting markdown file should start with index {i+1}. \n{content}
-                          """, reset=True)
-    # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe writing_agent has already generated summary for each paper under the working directory. What you need to do now is just reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.") 
-    survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}. \nThe writing_agent has already generated summary for each of these papers under the working directory. What you need to do now is reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.")        
-    # # survey_writing_agent.run(f"Write a literature survey on current research on {query}. Your audience will be students and researchers in the relevant fields. Be sure to include technical details and references to the literature.\nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}.\nYour should write a comprehensive literature survey based on these papers. You must include detailed descriptions and analyses of each paper in your literature survey.")
+    while i < len(lines):
+        line = lines[i]
+
+        if LIST_MARKER_RE.match(line):
+            # ---- blank line BEFORE the item ---------------------------
+            if out and out[-1].strip():          # prev line exists & not blank
+                out.append("")
+
+            # ---- the item itself -------------------------------------
+            out.append(line)
+
+            # ---- blank line AFTER the item ----------------------------
+            next_is_blank = (i + 1 < len(lines) and not lines[i + 1].strip())
+            if not next_is_blank:
+                out.append("")
+
+            i += 1
+            continue
+
+        # not a list item → copy verbatim
+        out.append(line)
+        i += 1
+
+    return "\n".join(out)
+
+def write_report(query: str, working_directory: str, model: LiteLLMModel, max_retries: int = 3):
+    # print("===== First stage: paper search =====")
+    # paper_search_agent = create_paper_search_agent(
+    #     working_directory=os.path.join(working_directory, "relevant_papers"),
+    #     model=model,
+    #     max_steps=5,
+    #     verbosity_level=LogLevel.DEBUG,
+    # )
+    # paper_summary = paper_search_agent.run(query).to_string()
+
+    # paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
+
+    # retries = 0
+    # while len(paper_md_list) == 0 and retries < max_retries:
+    #     print("No markdown files found in paper search agent report.")
+    #     print("Ask paper search agent to retrieve paper content based on history.")
+    #     paper_summary = paper_search_agent.run("No markdown files were found in the working directory. Most likely reason was that you did not call get_paper_from_url or the calls failed. Please try to retrieve paper content from the URLs you have found so far without any further search.", reset=False).to_string()
+    #     paper_md_list = [str(p) for p in Path(os.path.join(working_directory, "relevant_papers")).rglob("*.md")]
+    #     retries += 1
+
+    # print(f"Extracted {len(paper_md_list)} markdown files from paper search agent report.")
+    # print(paper_md_list)
+    # print("===== Second stage: literature survey writing =====")
+    # writing_agent, survey_writing_agent = create_survey_writing_agent(model=LiteLLMModel(model_id="gpt-4.1"), output_dir=working_directory)
+
+    # for i,full_path in enumerate(paper_md_list):
+    #     with open(full_path, "r", encoding="utf-8") as f:
+    #         content = f.read()
+    #     writing_agent(f"""Read the following paper and write a concise but comprehensive summary in markdown format (MODE=PER_PAPER). Name of the resulting markdown file should start with index {i+1}. \n{content}
+    #                       """, reset=True)
+    # # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe writing_agent has already generated summary for each paper under the working directory. What you need to do now is just reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.") 
+    # survey_writing_agent.run(f"Write a literature survey on {query}. Your audience will be students and researchers in the relevant fields. \nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}. \nThe writing_agent has already generated summary for each of these papers under the working directory. What you need to do now is reading these summaries and writing an overview section based on them (save the overview section with name 00_overview.md). You should also include a reference list at the end of the overview.")        
+    # # # survey_writing_agent.run(f"Write a literature survey on current research on {query}. Your audience will be students and researchers in the relevant fields. Be sure to include technical details and references to the literature.\nThe following list of papers under folder relevant_papers has been provided as context:\n{paper_summary}.\nYour should write a comprehensive literature survey based on these papers. You must include detailed descriptions and analyses of each paper in your literature survey.")
 
     print("===== Third stage: compile the report =====")
-    #Try compilation with fallback
-    if not try_compile_with_fallback(working_directory, 'full_report.html'):
-        print("\nAll compilation attempts failed. Please check the markdown files manually.")
-        print("Common issues to check:")
-        print("1. YAML metadata blocks")
-        print("2. Malformed headers")
-        print("3. Inconsistent list formatting")
-        print("4. Unclosed code blocks")
-        print("5. Malformed math expressions")
-        print("6. Special characters in headers")
-        print("7. Inconsistent line breaks")
+    # combine all .md files under working_directory into a single .md file
+    md_files = sorted([f for f in glob(os.path.join(working_directory, "*.md"))])
+    if not md_files:
+        raise FileNotFoundError("No main content *.md files found in the working directory.")
 
+    # 2) concatenate their contents (UTF‑8‑safe)
+    full_markdown = "\n\n".join(_read_file_utf8_safe(p) for p in md_files)
+    full_markdown = blank_lines_around_list_items(full_markdown)
+    # write markdown to a single file
+    output_file = os.path.join(working_directory, "final_report.md")
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(full_markdown)
+
+    # if not try_compile_with_fallback(working_directory, 'full_report.html'):
+    #     print("\nAll compilation attempts failed. Please check the markdown files manually.")
+    #     print("Common issues to check:")
+    #     print("1. YAML metadata blocks")
+    #     print("2. Malformed headers")
+    #     print("3. Inconsistent list formatting")
+    #     print("4. Unclosed code blocks")
+    #     print("5. Malformed math expressions")
+    #     print("6. Special characters in headers")
+    #     print("7. Inconsistent line breaks")
+    
+    return {
+        "status": "success",
+        "directory": working_directory,
+        "filename": "final_report.md"
+    }
 
 if __name__ == "__main__":
     base_temp_dir = "literature_survey_app/temp_files"
     Path(base_temp_dir).mkdir(parents=True, exist_ok=True)
-    working_directory = None
+    working_directory = "literature_survey_app/temp_files/working_directory_prdgxpt8"
     if working_directory is None:
         working_directory = tempfile.mkdtemp(dir=base_temp_dir, prefix="working_directory_")
     print(f"Using working directory: {working_directory}")
