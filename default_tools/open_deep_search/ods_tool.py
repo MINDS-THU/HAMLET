@@ -58,6 +58,9 @@ class OpenDeepSearchTool(Tool):
         self.searxng_api_key = searxng_api_key
 
     def forward(self, queries: List[str]):  # type: ignore[override]
+        print("===============================================")
+        print("===============================================")
+        print("===============================================")
         output = ""
         if not queries:
             return "No queries provided."
@@ -90,11 +93,32 @@ class OpenDeepSearchTool(Tool):
                     for q in queries
                 ]
                 return await asyncio.gather(*tasks, return_exceptions=True)
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import nest_asyncio
-            nest_asyncio.apply()
-        results = loop.run_until_complete(run_all())
+        # --- Async execution strategy ---
+        # Previous implementation used get_event_loop + run_until_complete, which fails
+        # in worker threads (no loop set) producing: RuntimeError: There is no current event loop.
+        # For a Flask / threaded production context the safest, least-surprising approach
+        # is to spin up a fresh event loop per call via asyncio.run(). This avoids nested
+        # loop patching (nest_asyncio) and prevents cross-thread loop reuse issues.
+        # If we are somehow already inside a running loop (very rare for this sync Tool.forward),
+        # we fallback to creating a new loop manually because asyncio.run() cannot be called
+        # from an existing running loop.
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop and running_loop.is_running():
+            # Create an isolated loop to avoid nest_asyncio complexity and potential deadlocks.
+            new_loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(new_loop)
+                results = new_loop.run_until_complete(run_all())
+            finally:
+                new_loop.close()
+                asyncio.set_event_loop(running_loop)
+        else:
+            # No running loop in this thread: simplest & safe.
+            results = asyncio.run(run_all())
         # Format output, with indexing for clarity
         for i, (query, result) in enumerate(zip(queries, results), 1):
             # Handle timeouts/exceptions uniformly
