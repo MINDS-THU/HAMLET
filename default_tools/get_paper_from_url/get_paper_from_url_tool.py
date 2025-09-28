@@ -1,14 +1,24 @@
 from langchain.docstore.document import Document
 import requests
+from urllib.parse import quote as _urlquote
 import fitz  # PyMuPDF
 from requests.exceptions import HTTPError
 import re
 from smolagents import Tool
 import os
+import tempfile
+import shutil
+import hashlib
 from typing import Optional, List
 from bs4 import BeautifulSoup  # HTML text extraction fallback
+try:  # For type checking safety with BeautifulSoup elements
+    from bs4 import Tag  # type: ignore
+except Exception:  # pragma: no cover - fallback if bs4 changes
+    Tag = object  # type: ignore
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import tempfile
+import shutil
 
 # Optional Selenium imports (not required if unavailable)
 try:  # pragma: no cover - optional path
@@ -172,25 +182,106 @@ def extract_title_from_content(text: str) -> Optional[str]:
 
 
 def extract_text_from_pdf_url(url: str, return_title: bool = False):
+    """Fetch a PDF from a URL and extract text.
+
+    Adds robust per-page error handling so that a single corrupt / non-standard
+    page (e.g. MuPDF color space parsing issue) does not abort extraction of
+    the remaining pages. Optionally returns the metadata title.
+
+    Env flags:
+      HAMLET_PDF_DEBUG=1     -> verbose logging of skipped pages / fallbacks
+      HAMLET_PDF_PAGE_MODE   -> comma list of extraction methods to try per page
+                                 (default: "text,raw,blocks")
+    """
+    debug = _env_truthy("HAMLET_PDF_DEBUG", False)
     try:
         session = _get_requests_session()
-        response = session.get(url, timeout=(10, 60))  # connect, read timeouts
+        response = session.get(url, timeout=(10, 60))  # (connect, read) timeouts
         response.raise_for_status()
-        with fitz.open(stream=response.content, filetype="pdf") as doc:
-            text = "\n".join(page.get_text("text") for page in doc)  # type: ignore[attr-defined]
+        try:
+            doc = fitz.open(stream=response.content, filetype="pdf")
+        except Exception as e:
+            if debug:
+                print(f"[PDFDebug] Failed to open PDF {url}: {e}")
+            return ("", None) if return_title else ""
+        try:
+            page_modes_env = os.environ.get("HAMLET_PDF_PAGE_MODE", "text,raw,blocks")
+            page_modes = [m.strip() for m in page_modes_env.split(',') if m.strip()]
+            collected: List[str] = []
+            skipped_pages: List[tuple[int, str]] = []
+            for page_index in range(len(doc)):
+                try:
+                    page = doc.load_page(page_index)  # may itself fail
+                except Exception as e:
+                    skipped_pages.append((page_index, f"load_page error: {e}"))
+                    continue
+                page_text = ""
+                last_err: Optional[str] = None
+                for mode in page_modes:
+                    try:
+                        # Common modes: "text" (layout-aware), "raw", "blocks"
+                        page_text = page.get_text(mode)  # type: ignore[arg-type]
+                        if page_text:
+                            break
+                    except Exception as e_mode:
+                        last_err = str(e_mode)
+                        continue
+                if not page_text:
+                    # As an extreme fallback, try extracting individual spans (if accessible)
+                    try:  # pragma: no cover - rare path
+                        blocks = page.get_text("dict").get("blocks", [])  # type: ignore
+                        spans_accum: List[str] = []
+                        for b in blocks:
+                            for l in b.get("lines", []):
+                                for s in l.get("spans", []):
+                                    txt = s.get("text")
+                                    if txt:
+                                        spans_accum.append(txt)
+                        page_text = "\n".join(spans_accum)
+                    except Exception as e_span:
+                        last_err = last_err or str(e_span)
+                if page_text:
+                    collected.append(page_text)
+                else:
+                    skipped_pages.append((page_index, last_err or "unknown extraction failure"))
+            if debug and skipped_pages:
+                print(f"[PDFDebug] Skipped {len(skipped_pages)} page(s) in {url}:")
+                for idx, reason in skipped_pages[:10]:  # cap log spam
+                    print(f"  - page {idx}: {reason}")
+                if len(skipped_pages) > 10:
+                    print(f"  ... {len(skipped_pages)-10} more skipped page(s) ...")
+            full_text = "\n".join(collected)
             if return_title:
                 try:
                     meta_title = (doc.metadata or {}).get("title")
                 except Exception:
                     meta_title = None
-                return text, meta_title
-            return text
+                finally:
+                    try:
+                        doc.close()
+                    except Exception:
+                        pass
+                return full_text, meta_title
+            else:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+                return full_text
+        finally:
+            try:  # ensure doc is closed if not already
+                if not doc.is_closed:  # type: ignore[attr-defined]
+                    doc.close()
+            except Exception:
+                pass
     except HTTPError as http_err:
         status = getattr(getattr(http_err, 'response', None), 'status_code', 'unknown')
-        print(f"HTTP error occurred: {http_err} (Status code: {status})")
+        if debug:
+            print(f"[PDFDebug] HTTP error fetching {url}: {http_err} (status={status})")
         return ("", None) if return_title else ""
     except Exception as err:
-        print(f"Other error occurred: {err}")
+        if debug:
+            print(f"[PDFDebug] Other error for {url}: {err}")
         return ("", None) if return_title else ""
 
 
@@ -249,18 +340,170 @@ def _extract_text_from_html(html: str) -> str:
 def _load_web_docs_via_requests(urls: List[str]) -> List[Document]:
     session = _get_requests_session()
     docs: List[Document] = []
+    debug = _env_truthy("HAMLET_GET_PAPER_DEBUG", False)
+
+    def _discover_pdf_and_extract(parent_url: str, html: str) -> Optional[Document]:
+        """Attempt to locate a PDF link inside an HTML page (meta tags or anchors) and extract it.
+
+        Strategies:
+          1. <meta name="citation_pdf_url" content="..."> (common on ACM / Springer / etc.)
+          2. Anchor tags where href endswith .pdf or contains '/pdf/' or 'download' with pdf inside.
+        Returns a Document if successful, else None.
+        """
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception:
+            return None
+        # Meta tag
+        meta = soup.find("meta", attrs={"name": "citation_pdf_url"})
+        candidates: List[str] = []
+        if isinstance(meta, Tag):
+            content_val = meta.get("content")  # type: ignore[index]
+            if isinstance(content_val, str) and content_val.strip():
+                candidates.append(content_val.strip())
+        # Anchor tags
+        for a in soup.find_all("a"):  # type: ignore
+            if not isinstance(a, Tag):
+                continue
+            # Use getattr to satisfy static analysis; BeautifulSoup Tag supports .get at runtime
+            href_val = getattr(a, 'get', lambda *_: None)("href")  # type: ignore[call-arg]
+            if not isinstance(href_val, str):
+                continue
+            href = href_val.strip()
+            if not href:
+                continue
+            href_lower = href.lower()
+            if any(x in href_lower for x in [".pdf", "/pdf/", "download"]) and (".pdf" in href_lower or href_lower.endswith("pdf")):
+                candidates.append(href)
+        # Normalize / dedupe
+        normed: List[str] = []
+        seen = set()
+        for c in candidates:
+            if c.startswith("//"):
+                # protocol-relative
+                c = ("https:" if parent_url.lower().startswith("https") else "http:") + c
+            elif c.startswith("/"):
+                # relative to domain
+                try:
+                    from urllib.parse import urlparse, urljoin
+                    c = urljoin(parent_url, c)
+                except Exception:
+                    pass
+            if c not in seen:
+                seen.add(c)
+                normed.append(c)
+        for pdf_url in normed[:3]:  # Cap attempts to avoid long chains
+            try:
+                if debug:
+                    print(f"[GetPaperFromURL][DiscoverPDF] Trying embedded PDF: {pdf_url}")
+                text, meta_title = extract_text_from_pdf_url(pdf_url, return_title=True)
+                if text.strip():
+                    text = remove_irrelevant_sections(text)
+                    meta = {"source": pdf_url}
+                    if meta_title:
+                        meta["title"] = meta_title
+                    return Document(page_content=text, metadata=meta)
+            except Exception as e:  # pragma: no cover - network / parse variability
+                if debug:
+                    print(f"[GetPaperFromURL][DiscoverPDF] Failed {pdf_url}: {e}")
+                continue
+        return None
     for url in urls:
         try:
             resp = session.get(url, timeout=(10, 60))
             if resp.status_code >= 400:
+                if debug:
+                    print(f"[GetPaperFromURL] HTTP {resp.status_code} for {url}; skipping")
                 continue
-            html = resp.text
+            html = resp.text or ""
             text = _extract_text_from_html(html) if html else ""
-            if text:
-                docs.append(Document(page_content=text, metadata={"source": url}))
-        except Exception:
-            # Silently skip; Selenium path may handle it
+            # If no text or extremely short (< 200 chars), attempt PDF discovery
+            doc_obj: Optional[Document] = None
+            if (not text) or len(text) < 200:
+                if debug:
+                    print(f"[GetPaperFromURL] Weak HTML extraction for {url} (len={len(text)}); attempting embedded PDF discovery")
+                doc_obj = _discover_pdf_and_extract(url, html)
+            if doc_obj is None and text:
+                doc_obj = Document(page_content=text, metadata={"source": url})
+            if doc_obj:
+                docs.append(doc_obj)
+            else:
+                if debug:
+                    print(f"[GetPaperFromURL] No usable content derived from {url}")
+        except Exception as e:
+            if debug:
+                print(f"[GetPaperFromURL] Exception processing {url}: {e}")
             continue
+
+    # Fallback: If no docs were captured for ResearchGate URLs, optionally try OpenAlex API
+    if not docs:
+        rg_candidates = [u for u in urls if 'researchgate.net/publication/' in u.lower()]
+        if rg_candidates and _env_truthy("HAMLET_ENABLE_OPENALEX_FALLBACK", True):
+            if debug:
+                print(f"[GetPaperFromURL][OpenAlex] Attempting OpenAlex fallback for {len(rg_candidates)} ResearchGate URL(s)")
+            for rg_url in rg_candidates:
+                # Derive a search query from the tail slug
+                try:
+                    slug = rg_url.rstrip('/').split('/')[-1]
+                    # Remove leading numeric id part if present (pattern: digits_)
+                    parts = slug.split('_')
+                    if parts and parts[0].isdigit():
+                        parts = parts[1:]
+                    query = ' '.join(p for p in parts if p).strip()
+                    # Guard length
+                    if len(query) < 8:
+                        if debug:
+                            print(f"[GetPaperFromURL][OpenAlex] Query '{query}' too short; skipping")
+                        continue
+                    oa_url = f"https://api.openalex.org/works?search={_urlquote(query)}&per-page=3"
+                    if debug:
+                        print(f"[GetPaperFromURL][OpenAlex] Fetching {oa_url}")
+                    try:
+                        r = session.get(oa_url, timeout=(10, 30))
+                        if r.status_code != 200:
+                            if debug:
+                                print(f"[GetPaperFromURL][OpenAlex] HTTP {r.status_code} for query '{query}'")
+                            continue
+                        data = r.json()
+                    except Exception as e_json:
+                        if debug:
+                            print(f"[GetPaperFromURL][OpenAlex] Failed querying OpenAlex: {e_json}")
+                        continue
+                    results = (data or {}).get('results') or []
+                    for work in results:
+                        try:
+                            # Prefer open access PDF link
+                            pdf_url = None
+                            open_access = work.get('open_access') if isinstance(work, dict) else None
+                            if isinstance(open_access, dict):
+                                pdf_url = open_access.get('oa_url') or open_access.get('pdf_url')
+                            # Fallback to primary location
+                            if not pdf_url and isinstance(work, dict):
+                                loc = work.get('primary_location') or {}
+                                if isinstance(loc, dict):
+                                    pdf_url = (loc.get('source') or {}).get('host_organization_page_url')  # type: ignore
+                            if not pdf_url:
+                                continue
+                            if debug:
+                                print(f"[GetPaperFromURL][OpenAlex] Attempt PDF {pdf_url}")
+                            text, meta_title = extract_text_from_pdf_url(pdf_url, return_title=True)
+                            if not text.strip():
+                                continue
+                            text = remove_irrelevant_sections(text)
+                            meta = {"source": pdf_url}
+                            if meta_title:
+                                meta['title'] = meta_title
+                            docs.append(Document(page_content=text, metadata=meta))
+                            # Stop after first successful fallback per ResearchGate URL
+                            break
+                        except Exception as e_work:  # pragma: no cover - external service variability
+                            if debug:
+                                print(f"[GetPaperFromURL][OpenAlex] Work processing error: {e_work}")
+                            continue
+                except Exception as e_rg:
+                    if debug:
+                        print(f"[GetPaperFromURL][OpenAlex] Error handling slug for {rg_url}: {e_rg}")
+                    continue
     return docs
 
 
@@ -285,14 +528,37 @@ def _load_web_docs_via_selenium(urls: List[str]) -> List[Document]:  # pragma: n
     options = _ChromeOptions()
     if headless:
         options.add_argument("--headless=new")
+    # Core hardening / container friendly flags
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")  # harmless in headless; avoids some env warnings
+    options.add_argument("--disable-extensions")
     options.add_argument(f"--user-agent={user_agent}")
     if quiet_logs:
         options.add_argument("--log-level=3")
         options.add_experimental_option("excludeSwitches", ["enable-logging"])  # hides many USB/device logs
     if proxy:
         options.add_argument(f"--proxy-server={proxy}")
+
+    # Ensure each run gets a unique Chrome profile dir (can be disabled)
+    supplied_profile = os.environ.get("HAMLET_CHROME_USER_DATA_DIR")
+    disable_profile = _env_truthy("HAMLET_CHROME_NO_PROFILE", False)
+    temp_profile_dir: Optional[str] = None
+    try:
+        if not disable_profile:
+            if supplied_profile:
+                os.makedirs(supplied_profile, exist_ok=True)
+                options.add_argument(f"--user-data-dir={supplied_profile}")
+            else:
+                temp_profile_dir = tempfile.mkdtemp(prefix="hamlet_chrome_profile_")
+                options.add_argument(f"--user-data-dir={temp_profile_dir}")
+            if _env_truthy("HAMLET_SELENIUM_DEBUG", False):
+                which = supplied_profile if supplied_profile else temp_profile_dir
+                print(f"[Selenium] Using user data dir: {which}")
+    except Exception as e:
+        if _env_truthy("HAMLET_SELENIUM_DEBUG", False):
+            print(f"[Selenium] Failed setting profile dir: {e}; continuing without user-data-dir")
+        temp_profile_dir = None
 
     # Build service; prefer user-specified driver
     try:
@@ -303,13 +569,50 @@ def _load_web_docs_via_selenium(urls: List[str]) -> List[Document]:  # pragma: n
     except Exception:
         service = None  # type: ignore[assignment]
 
+    from selenium.common.exceptions import SessionNotCreatedException, TimeoutException  # type: ignore
     driver = None
+    tried_without_profile = False
     try:
-        driver = _webdriver.Chrome(options=options, service=service) if service else _webdriver.Chrome(options=options)
+        try:
+            driver = _webdriver.Chrome(options=options, service=service) if service else _webdriver.Chrome(options=options)
+        except SessionNotCreatedException as e:
+            if _env_truthy("HAMLET_SELENIUM_DEBUG", False):
+                print(f"[Selenium] SessionNotCreatedException: {e}")
+            # Retry once without profile dir if we haven't already and profiles enabled
+            if not tried_without_profile and not disable_profile:
+                tried_without_profile = True
+                # Rebuild options without any user-data-dir
+                new_options = _ChromeOptions()
+                for arg in options.arguments:
+                    if not str(arg).startswith('--user-data-dir'):
+                        new_options.add_argument(arg)
+                options = new_options
+                temp_profile_dir = None
+                supplied_profile = None
+                try:
+                    driver = _webdriver.Chrome(options=options, service=service) if service else _webdriver.Chrome(options=options)
+                except Exception:
+                    if _env_truthy("HAMLET_SELENIUM_DEBUG", False):
+                        print("[Selenium] Retry without profile failed; abandoning Selenium path.")
+                    return []
+            else:
+                return []
+        # Set conservative timeouts so we don't hang indefinitely in CI / headless servers
+        try:
+            if driver is not None:
+                driver.set_page_load_timeout(int(os.environ.get("HAMLET_SELENIUM_PAGELOAD_TIMEOUT", "25")))
+        except Exception:
+            pass
+
         docs: List[Document] = []
         for url in urls:
             try:
-                driver.get(url)
+                # Guard each navigation with a timeout; if it times out we still attempt to collect partial DOM.
+                try:
+                    driver.get(url)
+                except TimeoutException:
+                    if _env_truthy("HAMLET_SELENIUM_DEBUG", False):
+                        print(f"[Selenium] Timeout loading {url}; continuing with partial content")
                 try:
                     driver.implicitly_wait(2)
                 except Exception:
@@ -326,11 +629,19 @@ def _load_web_docs_via_selenium(urls: List[str]) -> List[Document]:  # pragma: n
                 continue
         return docs
     finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        try:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+        finally:
+            # Remove temp profile dir only if we created it (not user supplied)
+            if 'temp_profile_dir' in locals() and temp_profile_dir and not supplied_profile:
+                try:
+                    shutil.rmtree(temp_profile_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
 
 def extract_docs_from_urls(urls: List[str]) -> List[Document]:
@@ -384,17 +695,97 @@ class GetPaperFromURL(Tool):
     def __init__(self, working_dir: str):
         super().__init__()
         self.working_dir = working_dir
+        # Track filenames this instance has produced to avoid collisions
+        self._seen_filenames: set[str] = set()
+
+    # ---------------- Filename / slug helpers -----------------
+    def _make_filename(self, title: str, source: Optional[str]) -> str:
+        """Create a filesystem-safe, reasonably short, collision-resistant markdown filename.
+
+        Strategy:
+        1. Normalize title -> slug (alnum + underscores) lowercased.
+        2. Collapse multiple underscores; trim leading/trailing underscores.
+        3. If empty, fall back to 'document'.
+        4. Truncate to configurable max (HAMLET_MAX_FILENAME_LEN, default 120) BEFORE adding hash.
+        5. Append short hash (first 8 hex of sha1(title + source)).
+        6. Guarantee total filename length (bytes) <= 240 (leave margin for various filesystems) and < 255 hard limit.
+        7. Deduplicate within the instance by adding incremental suffix if needed.
+        8. Always end with .md
+        """
+        raw = title if title else (source or "document")
+        # Basic slug
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", raw).lower()
+        slug = re.sub(r"_+", "_", slug).strip("_")
+        if not slug:
+            slug = "document"
+
+        # Configurable max length (characters) before hash
+        try:
+            max_len_env = int(os.environ.get("HAMLET_MAX_FILENAME_LEN", "120"))
+            # clamp to sane bounds
+            if max_len_env < 20:
+                max_len_env = 20
+            if max_len_env > 180:
+                max_len_env = 180
+        except Exception:
+            max_len_env = 120
+
+        # Short hash for disambiguation
+        h = hashlib.sha1((title + "|" + str(source)).encode("utf-8", errors="ignore")).hexdigest()[:8]
+        base = slug[:max_len_env]
+        candidate = f"{base}-{h}.md"
+
+        # Enforce byte-length safety (<255). Use 240 as soft cap.
+        def _shrink(name: str) -> str:
+            b = name.encode("utf-8", errors="ignore")
+            if len(b) <= 240:
+                return name
+            # shrink base further
+            keep = max(15, max_len_env // 2)
+            new_base = slug[:keep]
+            return f"{new_base}-{h}.md"
+
+        candidate = _shrink(candidate)
+
+        # Deduplicate if already seen in this run
+        if candidate in self._seen_filenames:
+            idx = 1
+            stem, ext = candidate.rsplit(".", 1)
+            while True:
+                alt = f"{stem}_{idx}.{ext}"
+                if alt not in self._seen_filenames and len(alt.encode('utf-8')) < 250:
+                    candidate = alt
+                    break
+                idx += 1
+        self._seen_filenames.add(candidate)
+        return candidate
 
     def forward(self, urls: list) -> str:  # type: ignore[override]
         if not urls:
             return "No URLs provided."
         try:
+            # Optional truncation for debugging / batching large URL lists
+            try:
+                max_urls_env = os.environ.get("HAMLET_MAX_URLS")
+                if max_urls_env:
+                    max_urls = int(max_urls_env)
+                    urls = urls[:max_urls]
+            except Exception:
+                pass
+
+            progress = _env_truthy("HAMLET_GET_PAPER_PROGRESS", False)
+            if progress:
+                print(f"[GetPaperFromURL] Starting extraction for {len(urls)} URL(s)")
             docs = extract_docs_from_urls(urls)
+            if progress:
+                print(f"[GetPaperFromURL] Fetched {len(docs)} document(s); beginning summarization")
             if not docs:
                 return "No valid documents found at the provided URLs."
 
             summary_lines: List[str] = []
-            for doc in docs:
+            for idx, doc in enumerate(docs, 1):
+                if progress:
+                    print(f"[GetPaperFromURL] Processing doc {idx}/{len(docs)}")
                 meta = doc.metadata or {}
                 title = (meta.get('title') or '').strip()
                 # Heuristic cleanup/guess when title is missing or noisy
@@ -416,8 +807,15 @@ class GetPaperFromURL(Tool):
                 # Clean common site suffixes
                 title = _clean_title_suffix(title)
 
-                filename = re.sub(r"\W+", "_", title).lower() + ".md"
+
+                filename = self._make_filename(title, meta.get('source'))
                 safe_filename = self._safe_path(filename)
+                # ensure the parent folder exists
+                os.makedirs(os.path.dirname(safe_filename), exist_ok=True)
+                # print(safe_filename)
+                # print("=============")
+                
+                # create 
                 # Compose simple Markdown: H1 title, source link (if any), then content
                 md_lines = [f"# {title}"]
                 source = meta.get('source') or meta.get('url')
@@ -426,8 +824,23 @@ class GetPaperFromURL(Tool):
                     md_lines.append(f"Source: {source}")
                 md_lines.append("")
                 md_lines.append(doc.page_content)
-                with open(safe_filename, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(md_lines))
+                try:
+                    with open(safe_filename, 'w', encoding='utf-8') as f:
+                        f.write("\n".join(md_lines))
+                except OSError as oe:
+                    # Retry with ultra-short fallback on filename too long or similar issues
+                    if getattr(oe, 'errno', None) == 36 or 'File name too long' in str(oe):
+                        short_hash = hashlib.sha1(title.encode('utf-8', errors='ignore')).hexdigest()[:10]
+                        fallback = self._safe_path(f"doc-{short_hash}.md")
+                        try:
+                            with open(fallback, 'w', encoding='utf-8') as f:
+                                f.write("\n".join(md_lines))
+                            filename = os.path.basename(fallback)
+                            safe_filename = fallback
+                        except Exception as oe2:
+                            return f"Error occurred: failed to write fallback filename as well: {oe2}"
+                    else:
+                        return f"Error occurred: {oe}"
 
                 # Extract abstract using robust parser
                 abstract = extract_abstract_from_text(doc.page_content)
@@ -443,9 +856,34 @@ class GetPaperFromURL(Tool):
                         extra_words = re.findall(r"\S+", tail)
                         if extra_words:
                             abstract = (abstract + " " + " ".join(extra_words[:120])).strip()
-                # Length sanity: trim overly long abstracts
-                if len(abstract) > 3000:
-                    abstract = abstract[:3000].rstrip() + " …"
+                # Length sanity: configurable trim
+                try:
+                    max_abs_env = int(os.environ.get("HAMLET_MAX_ABSTRACT_CHARS", "1500"))
+                    if max_abs_env < 200:
+                        max_abs_env = 200  # guard against extreme low values
+                    if max_abs_env > 5000:
+                        max_abs_env = 5000  # hard ceiling
+                except Exception:
+                    max_abs_env = 1500
+                original_len = len(abstract)
+                if len(abstract) > max_abs_env:
+                    abstract = abstract[:max_abs_env].rstrip() + " …"
+
+                # Optional second (tighter) limit just for the returned summary string
+                try:
+                    summary_abs_limit = int(os.environ.get("HAMLET_SUMMARY_ABSTRACT_CHARS", str(max_abs_env)))
+                    if summary_abs_limit < 100:
+                        summary_abs_limit = 100
+                    if summary_abs_limit > max_abs_env:
+                        # Don't silently allow it to exceed the main extracted limit
+                        summary_abs_limit = max_abs_env
+                except Exception:
+                    summary_abs_limit = max_abs_env
+                if len(abstract) > summary_abs_limit:
+                    abstract = abstract[:summary_abs_limit].rstrip() + " …"
+
+                if _env_truthy("HAMLET_ABSTRACT_DEBUG", False):
+                    print(f"[AbstractDebug] title_hash={hash(title)} original_len={original_len} final_len={len(abstract)} max_abs_env={max_abs_env} summary_abs_limit={summary_abs_limit}")
 
                 summary_lines.append(
                     f"Title: {title}\nAbstract: {abstract}\nSaved as: {os.path.basename(safe_filename)}\n"
