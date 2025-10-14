@@ -26,10 +26,6 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
 from datasets import Dataset
 from openai import AsyncOpenAI
 
@@ -43,6 +39,10 @@ from src.hamlet.train.codeagent_environment import CodeAgentEnv
 from src.hamlet.train.utils.types import ChatCompletionMessageParam, Messages, State
 from dotenv import load_dotenv
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 WORKSPACE_ROOT = PROJECT_ROOT / "examples" / "simple_agent_workspace" / "rollout_tool_check"
 EXPECTED_TOOL_NAMES = {

@@ -15,11 +15,11 @@ import os
 import re
 from typing import Optional
 
-from smolagents.agent_types import AgentAudio, AgentImage, AgentText
-from smolagents.agents import MultiStepAgent, PlanningStep
-from smolagents.memory import ActionStep, FinalAnswerStep, MemoryStep
-from smolagents.utils import _is_package_available
-from smolagents.models import ChatMessageStreamDelta
+from src.hamlet.core.agent_types import AgentAudio, AgentImage, AgentText
+from src.hamlet.core.agents import MultiStepAgent, PlanningStep
+from src.hamlet.core.memory import ActionStep, FinalAnswerStep, MemoryStep
+from src.hamlet.core.utils import _is_package_available
+from src.hamlet.core.models import ChatMessageStreamDelta
 
 
 def get_step_footnote_content(step_log: MemoryStep, step_name: str) -> str:

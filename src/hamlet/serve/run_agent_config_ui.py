@@ -164,7 +164,7 @@ class ToolFactory:
         if key in ToolFactory._kb_indexers:
             return ToolFactory._kb_indexers[key]
         try:
-            from default_tools.kb_repo_management.repo_indexer import RepoIndexer  # local import
+            from src.hamlet.tools.kb_repo_management.repo_indexer import RepoIndexer  # local import
             # Place vector store as sibling of knowledge_base (project_root/vector_store)
             index_dir = Path(kb_root).parent / "vector_store"
             index_dir.mkdir(exist_ok=True)
@@ -1271,7 +1271,8 @@ def app():
                     for tname, cls in cls_map.items():
                         module = getattr(cls, '__module__', '')
                         parts = module.split('.')
-                        group = parts[1] if len(parts) > 2 and parts[0] == 'default_tools' else '其他'
+                        # group = parts[-1] if len(parts) > 2 and parts[0] == 'src.hamlet.tools' else '其他'
+                        group = parts[-1] if len(parts) > 2 and parts[0] == 'src' else '其他'
                         desc = getattr(cls, 'description', '') or ''
                         grouped.setdefault(group, []).append((tname, desc))
                     for g in grouped:
@@ -1609,5 +1610,5 @@ if __name__ == "__main__":
     app_instance = app()
     print("App created successfully, attempting to launch...")
     app_instance.queue()  # Enable queue for better handling
-    app_instance.launch(server_name='0.0.0.0', server_port=58580, share=False)
+    app_instance.launch(server_name='0.0.0.0', server_port=4000, share=False)
     # app_instance.launch(server_port=7280, share=False)

@@ -12,11 +12,12 @@ dependencies = [
   "requests>=2.32.3",
   "rich>=13.9.4",
   "jinja2>=3.1.4",
-  "pillow>=10.0.1",  # Security fix for CVE-2023-4863: https://pillow.readthedocs.io/en/stable/releasenotes/10.0.1.html
+  "pillow>=10.0.1", # Security fix for CVE-2023-4863: https://pillow.readthedocs.io/en/stable/releasenotes/10.0.1.html
   "python-dotenv",
   "litellm>=1.60.2,<1.70",
   "openai>=1.58.1",
-  "datasets==4.1.1"
+  "datasets==4.1.1",
+  "pathvalidate>=3.3.1",
 ]
 
 [project.scripts]
@@ -48,6 +49,14 @@ serve = [
 ]
 tools = [
   "markitdown[all]>=0.1.2",
+  "watchdog>=6.0.0",
+  "serpapi",
+  "langchain==0.3.25",
+  "langchain_text_splitters==0.3.8",
+  "selenium",
+  "PyMuPDF",
+  "puremagic",
+  "nest_asyncio",
 ]
 
 [dependency-groups]

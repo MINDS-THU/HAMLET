@@ -5,7 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
-
+**/agent_configs
 # Virtual environments
+**/.ruff_cache/
 .venv
 **/.env

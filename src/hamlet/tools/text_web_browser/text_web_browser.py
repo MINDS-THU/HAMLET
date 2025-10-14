@@ -11,12 +11,22 @@ from urllib.parse import unquote, urljoin, urlparse
 
 import pathvalidate
 import requests
-from serpapi import GoogleSearch
 
-from smolagents import Tool
+try:
+    from serpapi import GoogleSearch
+except ImportError:  # pragma: no cover - optional dependency
+    GoogleSearch = None
+    _SERPAPI_IMPORT_ERROR = (
+        "The `serpapi` package is required for Google search. "
+        "Install the tools extra (e.g. `uv sync --extra tools`) to enable it."
+    )
+else:
+    _SERPAPI_IMPORT_ERROR = None
 
-from default_tools.text_web_browser.cookies import COOKIES
-from default_tools.text_web_browser.mdconvert import FileConversionException, MarkdownConverter, UnsupportedFormatException
+from src.hamlet.core.tools import Tool
+
+from .cookies import COOKIES
+from .mdconvert import FileConversionException, MarkdownConverter, UnsupportedFormatException
 
 
 class SimpleTextBrowser:
@@ -26,30 +36,27 @@ class SimpleTextBrowser:
         self,
         start_page: str | None = None,
         viewport_size: int | None = 1024 * 8,
-        downloads_folder: str | None = None,
-        serpapi_key: str | None = None,
-        request_kwargs: dict[str, Any] | None = None,
+        downloads_folder: str | None | None = None,
+        serpapi_key: str | None | None = None,
+        request_kwargs: dict[str, Any] | None | None = None,
     ):
         self.start_page: str = start_page if start_page else "about:blank"
-        self.viewport_size = viewport_size
+        self.viewport_size = viewport_size  # Applies only to the standard uri types
         self.downloads_folder = downloads_folder
         self.history: list[tuple[str, float]] = list()
         self.page_title: str | None = None
         self.viewport_current_page = 0
         self.viewport_pages: list[tuple[int, int]] = list()
-        
-        self.request_kwargs = request_kwargs or {}
-        self.request_kwargs["cookies"] = COOKIES  # assign cookies early
-
+        self.set_address(self.start_page)
         self.serpapi_key = serpapi_key
+        self.request_kwargs = dict(request_kwargs or {})
+        self.request_kwargs["cookies"] = COOKIES
         self._mdconvert = MarkdownConverter()
         self._page_content: str = ""
 
         self._find_on_page_query: str | None = None
-        self._find_on_page_last_result: int | None = None
+        self._find_on_page_last_result: int | None = None  # Location of the last result
 
-        self.set_address(self.start_page)  # <-- Move this after all setup
-        
     @property
     def address(self) -> str:
         """Return the address of the current page."""
@@ -205,6 +212,9 @@ class SimpleTextBrowser:
             start_idx = end_idx
 
     def _serpapi_search(self, query: str, filter_year: int | None = None) -> None:
+        if GoogleSearch is None:
+            raise ImportError(_SERPAPI_IMPORT_ERROR)
+
         if self.serpapi_key is None:
             raise ValueError("Missing SerpAPI key.")
 
@@ -374,40 +384,21 @@ class SimpleTextBrowser:
 
 
 class SearchInformationTool(Tool):
-    # Renamed to avoid collision with OpenDeepSearchTool which also used name "web_search"
     name = "simple_web_search"
-    description = (
-        "Perform a simple Google-style web search (SerpAPI required) and return formatted SERP results. "
-        "Use 'filter_year' to restrict results to a specific year (e.g., 2023)."
-    )
+    description = "Perform a web search query (think a google search) and returns the search results."
     inputs = {"query": {"type": "string", "description": "The web search query to perform."}}
     inputs["filter_year"] = {
         "type": "string",
-        "description": "[可选] 按年份过滤搜索结果，例如 '2023' 只返回 2023 年的页面。",
+        "description": "[Optional parameter]: filter the search results to only include pages from a specific year. For example, '2020' will only include pages from 2020. Make sure to use this parameter if you're trying to search for articles from a specific date!",
         "nullable": True,
     }
     output_type = "string"
 
-    def __init__(self, browser=None, serpapi_key: str | None = None, downloads_folder: str = "downloads"):
+    def __init__(self, browser):
         super().__init__()
-        # Allow optional injection; if not provided create our own SimpleTextBrowser
-        if browser is None:
-            # Ensure downloads folder exists
-            try:
-                os.makedirs(downloads_folder, exist_ok=True)
-            except Exception as e:
-                print(f"[simple_web_search] Failed to create downloads folder '{downloads_folder}': {e}")
-            serp_key = serpapi_key or os.getenv("SERPAPI_KEY") or os.getenv("SERPAPI_API_KEY")
-            self.browser = SimpleTextBrowser(downloads_folder=downloads_folder, serpapi_key=serp_key)
-        else:
-            self.browser = browser
+        self.browser = browser
 
-    def forward(self, query: str, filter_year: int | None = None) -> str:  # type: ignore[override]
-        if self.browser.serpapi_key is None:
-            return (
-                "[simple_web_search] Missing SerpAPI key. Set SERPAPI_KEY environment variable "
-                "or instantiate SearchInformationTool(browser=..., serpapi_key=...)."
-            )
+    def forward(self, query: str, filter_year: int | None = None) -> str:
         self.browser.visit_page(f"google: {query}", filter_year=filter_year)
         header, content = self.browser._state()
         return header.strip() + "\n=======================\n" + content
@@ -423,9 +414,7 @@ class VisitTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self, url: str) -> str:  # type: ignore[override]
-        if self.browser is None:
-            return "[visit_page] Browser not initialized."
+    def forward(self, url: str) -> str:
         self.browser.visit_page(url)
         header, content = self.browser._state()
         return header.strip() + "\n=======================\n" + content
@@ -444,7 +433,7 @@ DO NOT use this tool for .pdf or .txt or .htm files: for these types of files us
         super().__init__()
         self.browser = browser
 
-    def forward(self, url: str) -> str:  # type: ignore[override]
+    def forward(self, url: str) -> str:
         import requests
 
         if "arxiv" in url:
@@ -460,7 +449,7 @@ DO NOT use this tool for .pdf or .txt or .htm files: for these types of files us
         with open(new_path, "wb") as f:
             f.write(response.content)
 
-        if extension and ("pdf" in extension or "txt" in extension or "htm" in extension):
+        if "pdf" in extension or "txt" in extension or "htm" in extension:
             raise Exception("Do not use this tool for pdf or txt or html files: use visit_page instead.")
 
         return f"File was downloaded and saved under path {new_path}."
@@ -482,7 +471,7 @@ class ArchiveSearchTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self, url, date) -> str:  # type: ignore[override]
+    def forward(self, url, date) -> str:
         import requests
 
         no_timestamp_url = f"https://archive.org/wayback/available?url={url}"
@@ -499,8 +488,6 @@ class ArchiveSearchTool(Tool):
         else:
             raise Exception(f"Your {url=} was not archived on Wayback Machine, try a different url.")
         target_url = closest["url"]
-        if self.browser is None:
-            return "[find_archived_url] Browser not initialized."
         self.browser.visit_page(target_url)
         header, content = self.browser._state()
         return (
@@ -521,9 +508,7 @@ class PageUpTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self) -> str:  # type: ignore[override]
-        if self.browser is None:
-            return "[page_up] Browser not initialized."
+    def forward(self) -> str:
         self.browser.page_up()
         header, content = self.browser._state()
         return header.strip() + "\n=======================\n" + content
@@ -541,9 +526,7 @@ class PageDownTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self) -> str:  # type: ignore[override]
-        if self.browser is None:
-            return "[page_down] Browser not initialized."
+    def forward(self) -> str:
         self.browser.page_down()
         header, content = self.browser._state()
         return header.strip() + "\n=======================\n" + content
@@ -564,9 +547,7 @@ class FinderTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self, search_string: str) -> str:  # type: ignore[override]
-        if self.browser is None:
-            return "[find_on_page_ctrl_f] Browser not initialized."
+    def forward(self, search_string: str) -> str:
         find_result = self.browser.find_on_page(search_string)
         header, content = self.browser._state()
 
@@ -589,9 +570,7 @@ class FindNextTool(Tool):
         super().__init__()
         self.browser = browser
 
-    def forward(self) -> str:  # type: ignore[override]
-        if self.browser is None:
-            return "[find_next] Browser not initialized."
+    def forward(self) -> str:
         find_result = self.browser.find_next()
         header, content = self.browser._state()
 
