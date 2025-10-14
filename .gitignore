@@ -1,10 +1,11 @@
-/.env
-**/__pycache__/
-**/working_dirs/
-**/persistent_storage/**
-**/index_dir/**
-/.gradio/
-**/faiss_index
-**/test_outputs
-**/temp_files
-**/downloads
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+**/.env
