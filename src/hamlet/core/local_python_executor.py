@@ -1607,6 +1607,7 @@ class CodeOutput:
     output: Any
     logs: str
     is_final_answer: bool
+    executor_state: dict[str, Any] | None = None
 
 
 class PythonExecutor(ABC):
@@ -1685,7 +1686,7 @@ class LocalPythonExecutor(PythonExecutor):
             max_print_outputs_length=self.max_print_outputs_length,
         )
         logs = str(self.state["_print_outputs"])
-        return CodeOutput(output=output, logs=logs, is_final_answer=is_final_answer)
+        return CodeOutput(output=output, logs=logs, is_final_answer=is_final_answer, executor_state=self.state.copy())
 
     def send_variables(self, variables: dict[str, Any]):
         self.state.update(variables)

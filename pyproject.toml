@@ -57,6 +57,11 @@ tools = [
   "PyMuPDF",
   "puremagic",
   "nest_asyncio",
+  "crawl4ai>=0.7.0",
+  "loguru",
+  "certifi",
+  "cryptography",
+  "pyOpenSSL",
 ]
 
 [dependency-groups]

@@ -26,7 +26,8 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Type, TypeAlias, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, Literal, Type, TypeAlias, TypedDict, Union
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 
 import yaml
 from huggingface_hub import create_repo, metadata_update, snapshot_download, upload_folder
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_types import handle_agent_output_types
-from .local_python_executor import BASE_BUILTIN_MODULES, LocalPythonExecutor, PythonExecutor, fix_final_answer_code
+from .local_python_executor import BASE_BUILTIN_MODULES, LocalPythonExecutor, PythonExecutor, fix_final_answer_code, CodeOutput
 from .memory import (
     ActionStep,
     AgentMemory,
@@ -83,6 +84,7 @@ from .utils import (
     is_valid_name,
     make_init_file,
     parse_code_blobs,
+    parse_several_code_blobs,
     truncate_content,
 )
 
@@ -583,8 +585,13 @@ You have been provided with these additional arguments, that you can access dire
                 self.step_number += 1
 
         if not returned_final_answer and self.step_number == max_steps + 1:
-            final_answer = self._handle_max_steps_reached(task)
-            yield action_step
+            final_answer, final_memory_step = self._handle_max_steps_reached(task)
+            self.logger.log_markdown(
+                content=final_answer or "",
+                title="Final answer given by LLM when max steps reached:",
+                level=LogLevel.DEBUG,
+            )
+            yield final_memory_step
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
 
     def _validate_final_answer(self, final_answer: Any):
@@ -610,7 +617,7 @@ You have been provided with these additional arguments, that you can access dire
         final_memory_step.action_output = final_answer.content
         self._finalize_step(final_memory_step)
         self.memory.steps.append(final_memory_step)
-        return final_answer.content
+        return final_answer.content, final_memory_step
 
     def _generate_planning_step(
         self, task, is_first_step: bool, step: int
@@ -625,7 +632,12 @@ You have been provided with these additional arguments, that you can access dire
                             "type": "text",
                             "text": populate_template(
                                 self.prompt_templates["planning"]["initial_plan"],
-                                variables={"task": task, "tools": self.tools, "managed_agents": self.managed_agents},
+                                variables={"task": task, 
+                                           "tools": self.tools, 
+                                           "managed_agents": self.managed_agents,
+                                           "code_block_opening_tag": self.code_block_tags[0],
+                                           "code_block_closing_tag": self.code_block_tags[1]
+                                           },
                             ),
                         }
                     ],
@@ -651,7 +663,10 @@ You have been provided with these additional arguments, that you can access dire
                     {
                         "type": "text",
                         "text": populate_template(
-                            self.prompt_templates["planning"]["update_plan_pre_messages"], variables={"task": task}
+                            self.prompt_templates["planning"]["update_plan_pre_messages"], 
+                            variables={"task": task,
+                                       "code_block_opening_tag": self.code_block_tags[0],
+                                       "code_block_closing_tag": self.code_block_tags[1]}
                         ),
                     }
                 ],
@@ -1277,9 +1292,9 @@ class CodeAgent(MultiStepAgent):
         ### Generate model output ###
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
-        if self.code_block_tags[1] not in self.code_block_tags[0]:
-            # If the closing tag is contained in the opening tag, adding it as a stop sequence would cut short any code generation
-            stop_sequences.append(self.code_block_tags[1])
+        # if self.code_block_tags[1] not in self.code_block_tags[0]:
+        #     # If the closing tag is contained in the opening tag, adding it as a stop sequence would cut short any code generation
+        #     stop_sequences.append(self.code_block_tags[1])
         try:
             additional_args: dict[str, Any] = {}
             if self._use_structured_outputs_internally:
@@ -1316,63 +1331,284 @@ class CodeAgent(MultiStepAgent):
                 code_action = json.loads(output_text)["code"]
                 code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
             else:
-                code_action = parse_code_blobs(output_text, self.code_block_tags)
-            code_action = fix_final_answer_code(code_action)
-            memory_step.code_action = code_action
+                code_actions, early_stop_strategy, early_stop_details = parse_several_code_blobs(output_text, self.code_block_tags)
+            code_actions = [fix_final_answer_code(code_action) for code_action in code_actions]
+            memory_step.code_action = code_actions
         except Exception as e:
             error_msg = f"Error in code parsing:\n{e}\nMake sure to provide correct code blobs."
             raise AgentParsingError(error_msg, self.logger)
 
-        tool_call = ToolCall(
-            name="python_interpreter",
-            arguments=code_action,
-            id=f"call_{len(self.memory.steps)}",
-        )
-        yield tool_call
-        memory_step.tool_calls = [tool_call]
+        if len(code_actions) == 1:
+            code_action = code_actions[0]
+            tool_call = ToolCall(
+                name="python_interpreter",
+                arguments=code_action,
+                id=f"call_{len(self.memory.steps)}",
+            )
+            yield tool_call
+            memory_step.tool_calls = [tool_call]
 
-        ### Execute action ###
-        self.logger.log_code(title="Executing parsed code:", content=code_action, level=LogLevel.INFO)
-        try:
-            code_output = self.python_executor(code_action)
-            execution_outputs_console = []
-            if len(code_output.logs) > 0:
-                execution_outputs_console += [
-                    Text("Execution logs:", style="bold"),
-                    Text(code_output.logs),
-                ]
-            observation = "Execution logs:\n" + code_output.logs
-        except Exception as e:
-            if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
-                execution_logs = str(self.python_executor.state["_print_outputs"])
-                if len(execution_logs) > 0:
-                    execution_outputs_console = [
+            ### Execute action ###
+            self.logger.log_code(title="Executing parsed code:", content=code_action, level=LogLevel.INFO)
+            try:
+                code_output: CodeOutput = self.python_executor(code_action)
+                execution_outputs_console = []
+                if len(code_output.logs) > 0:
+                    execution_outputs_console += [
                         Text("Execution logs:", style="bold"),
-                        Text(execution_logs),
+                        Text(code_output.logs.strip()),
                     ]
-                    memory_step.observations = "Execution logs:\n" + execution_logs
-                    self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
-            error_msg = str(e)
-            if "Import of " in error_msg and " is not allowed" in error_msg:
-                self.logger.log(
-                    "[bold red]Warning to user: Code execution failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
-                    level=LogLevel.INFO,
+                observation = "Execution logs:\n" + code_output.logs.strip()
+            except Exception as e:
+                if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
+                    execution_logs = str(self.python_executor.state["_print_outputs"])
+                    if len(execution_logs) > 0:
+                        execution_outputs_console = [
+                            Text("Execution logs:", style="bold"),
+                            Text(execution_logs.strip()),
+                        ]
+                        memory_step.observations = "Execution logs:\n" + execution_logs.strip()
+                        self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+                error_msg = str(e)
+                if "Import of " in error_msg and " is not allowed" in error_msg:
+                    self.logger.log(
+                        "[bold red]Warning to user: Code execution failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
+                        level=LogLevel.INFO,
+                    )
+                raise AgentExecutionError(error_msg, self.logger)
+
+            truncated_output = truncate_content(str(code_output.output))
+            observation += "Last output from code snippet:\n" + truncated_output
+            memory_step.observations = observation
+
+            if not code_output.is_final_answer:
+                execution_outputs_console += [
+                    Text(f"Out: {truncated_output}", style="bold"),
+                ]
+            self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+            memory_step.action_output = code_output.output
+            yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
+        
+        else:
+            memory_step.tool_calls = []
+            for idx, code_action in enumerate(code_actions):
+                tool_call = ToolCall(
+                    name="python_interpreter",
+                    arguments=code_action,
+                    id=f"call_{len(self.memory.steps)}_Code#{idx}",
                 )
-            raise AgentExecutionError(error_msg, self.logger)
+                yield tool_call
+                memory_step.tool_calls.append(tool_call)
+            
+            ### Execute actions concurrently ###
+            all_code_outputs: Dict[str, Any] = {}
+            executor = ProcessPoolExecutor(max_workers=len(code_actions))
+            execution_outputs_console = []
+            observation = ""
+            temp_executor_state = self.python_executor.state.copy()
+            futures: Dict[Future, int] = {executor.submit(self.python_executor, code_action): idx for idx, code_action in enumerate(code_actions)}
+            for idx, code_action in enumerate(code_actions):
+                self.logger.log_code(title=f"Concurrently executing parsed Code#{idx+1} ({len(code_actions)} in total)", content=code_action, level=LogLevel.INFO)
+                
+            if early_stop_strategy != "none":
+                execution_outputs_console += [
+                    Text(f"Early stop strategy detected: '{early_stop_strategy}'. Will check each code execution result accordingly.", style="bold yellow")
+                ]
+                code_check = True if early_stop_strategy == "code" else False
+                current_step_finished = False
+                if code_check:
+                    self.logger.log_code(title="Parsed early stop code:", content=early_stop_details, level=LogLevel.INFO)
+                else:
+                    self.logger.log_code(title="Parsed early stop prompt:", content=early_stop_details, level=LogLevel.INFO)
+                future_count = 0
 
-        truncated_output = truncate_content(str(code_output.output))
-        observation += "Last output from code snippet:\n" + truncated_output
-        memory_step.observations = observation
+                try:
+                    for future in as_completed(futures):
+                        idx = futures[future]
+                        code_output: CodeOutput = future.result()
+                        all_code_outputs[f"Code#{idx+1}"] = code_output
+                        future_count += 1
+                        if len(code_output.logs) > 0:
+                            execution_outputs_console += [
+                                Text(f"Execution logs for Code#{idx+1} ({len(code_actions)} in total):", style="bold"),
+                                Text(code_output.logs.strip()),
+                            ]
+                        observation += f"Execution logs for Code#{idx+1} ({len(code_actions)} in total):\n" + code_output.logs.strip()
+                        if code_check:
+                            try:
+                                execution_outputs_console += [
+                                    Text(f"Executing parsed early stop code for Code#{idx+1} ({len(code_actions)} in total)...", style="bold")
+                                ]
+                                early_stop_details += "\nfinal_answer(early_stop_result)"
+                                self.python_executor.state = code_output.executor_state
+                                # print(self.python_executor.state)
+                                current_step_finished = self.python_executor(early_stop_details.strip()).output
+                                if isinstance(current_step_finished, str):
+                                    current_step_finished = "True" in current_step_finished.strip() or "true" in current_step_finished.strip()
+                            except Exception as e:
+                                self.logger.log(f"[bold red]Error occurred while executing early stop code (when evaluating the execution result of Code#{idx+1}): {e}", level=LogLevel.ERROR)
+                                error_msg = f"An error occurred while executing early stop code (when evaluating the execution result of Code#{idx+1}): {e}"
+                                raise AgentExecutionError(error_msg, self.logger) from e
+                        else:
+                            execution_outputs_console += [
+                                    Text(f"Using early stop prompt for Code#{idx+1} ({len(code_actions)} in total)...", style="bold")
+                                ]
+                            check_system_prompt = ChatMessage(
+                                role=MessageRole.SYSTEM,
+                                content=[
+                                    {
+                                        "type": "text",
+                                        "text": self.prompt_templates["earlystop"]["system_prompt"]
+                                    }
+                                ]
+                            )
+                            check_prompt = ChatMessage(
+                                role=MessageRole.USER,
+                                content=[
+                                    {
+                                        "type": "text",
+                                        "text": populate_template(
+                                            self.prompt_templates["earlystop"]["earlystop_prompt"],
+                                            variables={"output": code_output.logs, "details": early_stop_details},
+                                        )
+                                    }
+                                ]
+                            )
+                            input_messages = [check_system_prompt, check_prompt]
+                            try:
+                                response = self.model.generate(input_messages)
+                                execution_outputs_console += [
+                                    Text(f"Output of llm evaluation with early stop prompt for Code#{idx+1} ({len(code_actions)} in total):", style="bold"),
+                                    Text(str(response.content).strip()),
+                                ]
+                                current_step_finished = "True" in str(response.content).strip() or "true" in str(response.content).strip()
+                            except Exception as e:
+                                raise AgentGenerationError(f"Error in generating evaluation result with early stop prompt:\n{e}", self.logger) from e
+                            
+                        if current_step_finished:
+                            execution_outputs_console += [
+                                Text(f"Evaluation for the execution result of Code#{idx+1} passed ({len(code_actions)} in total), other code executions will be cancelled.", style="green")
+                            ]
+                            observation += f"Evaluation for the execution result of Code#{idx+1} passed, other code executions will be cancelled.\nThe content of Code#{idx+1} is:\n{code_actions[idx]}\n"
+                            self.python_executor.state = code_output.executor_state.copy()
+                            truncated_output = truncate_content(str(code_output.output))
+                            observation += "Last output from code snippet:\n" + truncated_output
+                            if not code_output.is_final_answer:
+                                execution_outputs_console += [
+                                    Text(
+                                        f"Out: {truncated_output}",
+                                    ),
+                                ]
+                            break
+                        else:
+                            if future_count < len(code_actions):
+                                execution_outputs_console += [
+                                    Text(f"Evaluation for the execution result of Code#{idx+1} failed, other code executions will continue.", style="red")
+                                ]
+                                observation += f"Evaluation for the execution result of Code#{idx+1} failed ({len(code_actions)} in total), other code executions will continue.\n"
+                            else:
+                                execution_outputs_console += [
+                                    Text(f"Evaluation for the execution result of Code#{idx+1} failed, all code execution results did not pass the check.", style="red"),
+                                    Text(f"The execution results of all code snippets are as follows:", style="bold"),
+                                    Text("\n".join([f"{code_idx}: {code_output.output}" for code_idx, code_output in all_code_outputs.items()]))
+                                ]
+                                observation += f"Evaluation for the execution result of Code#{idx+1} failed ({len(code_actions)} in total), all code executions did not pass the check. The execution results of all code snippets are as follows:\n"
+                                for code_idx, code_output in all_code_outputs.items():
+                                    observation += f"{code_idx}: {code_output.output}\n"
+                                observation += "Here are some suggestions:\n1. Modify your code blocks\n2. Adjust your code (or prompt) for early stopping\n3. Change the early stop strategy if necessary.\n"
+                                self.python_executor.state = temp_executor_state.copy()
+                                code_output.output = None
+                                code_output.is_final_answer = False
 
-        if not code_output.is_final_answer:
-            execution_outputs_console += [
-                Text(
-                    f"Out: {truncated_output}",
-                ),
-            ]
-        self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
-        memory_step.action_output = code_output.output
-        yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
+                except AgentGenerationError as e:
+                    raise
+                except AgentExecutionError as e:
+                    raise
+                except Exception as e:
+                    if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
+                        execution_logs = str(self.python_executor.state["_print_outputs"])
+                        if len(execution_logs) > 0:
+                            execution_outputs_console = [
+                                Text(f"Execution logs for Code#{idx} ({len(code_actions)} in total):", style="bold"),
+                                Text(execution_logs.strip()),
+                            ]
+                            memory_step.observations = f"Execution logs for Code#{idx} ({len(code_actions)} in total):\n" + execution_logs
+                            self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+                    error_msg = f"An error occurred during Code execution #{idx}:\n{str(e)}\nThe content of Code#{idx} is:\n{code_actions[idx]}"
+                    if "Import of " in error_msg and " is not allowed" in error_msg:
+                        self.logger.log(
+                            f"[bold red]Warning to user: Code execution #{idx} ({len(code_actions)} in total) failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
+                            level=LogLevel.INFO,
+                        )
+                    raise AgentExecutionError(error_msg, self.logger)
+                finally:
+                    executor.shutdown(wait=False)
+                
+                # if current_step_finished:
+                #     self.python_executor.state = code_output.executor_state.copy()
+                #     truncated_output = truncate_content(str(code_output.output))
+                #     observation += "Last output from code snippet:\n" + truncated_output
+                #     if not code_output.is_final_answer:
+                #         execution_outputs_console += [
+                #             Text(
+                #                 f"Out: {truncated_output}",
+                #             ),
+                #         ]
+
+                memory_step.observations = observation
+                self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+                memory_step.action_output = code_output.output
+                yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
+            
+            else:
+                execution_outputs_console += [
+                    Text(f"Early stop strategy set to 'none'. Will gather all code execution results.", style="bold yellow")
+                ]
+                try:
+                    for future in as_completed(futures):
+                        idx = futures[future]
+                        code_output: CodeOutput = future.result()
+                        all_code_outputs[f"Code#{idx+1}"] = code_output
+                    all_code_outputs = dict(sorted(all_code_outputs.items()))
+                    truncated_output = ""
+                    for code_idx, code_output in all_code_outputs.items():
+                        if code_output.is_final_answer:
+                            raise AgentExecutionError("When early stop strategy is 'none', none of the code snippets should return a final answer.", self.logger)
+                        if len(code_output.logs) > 0:
+                            execution_outputs_console += [
+                                Text(f"Execution logs for {code_idx} ({len(code_actions)} in total):", style="bold"),
+                                Text(code_output.logs.strip()),
+                            ]
+                        observation += f"Execution logs for {code_idx} ({len(code_actions)} in total):\n{code_output.logs.strip()}\n"
+                        truncated_output += f"{code_idx}: {truncate_content(str(code_output.output))}\n"
+                    observation += "Last outputs from all code snippets:\n" + truncated_output
+                except AgentExecutionError as e:
+                    raise
+                except Exception as e:
+                    if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
+                        execution_logs = str(self.python_executor.state["_print_outputs"])
+                        if len(execution_logs) > 0:
+                            execution_outputs_console = [
+                                Text(f"Execution logs for Code#{idx} ({len(code_actions)} in total):", style="bold"),
+                                Text(execution_logs.strip()),
+                            ]
+                            memory_step.observations = f"Execution logs for Code#{idx} ({len(code_actions)} in total):\n" + execution_logs
+                            self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+                    error_msg = f"An error occurred during Code execution #{idx}:\n{str(e)}\nThe content of Code#{idx} is:\n{code_actions[idx]}"
+                    if "Import of " in error_msg and " is not allowed" in error_msg:
+                        self.logger.log(
+                            f"[bold red]Warning to user: Code execution #{idx} ({len(code_actions)} in total) failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
+                            level=LogLevel.INFO,
+                        )
+                    raise AgentExecutionError(error_msg, self.logger)
+                finally:
+                    executor.shutdown(wait=False)
+
+                memory_step.observations = observation
+                self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
+                memory_step.action_output = all_code_outputs
+                yield ActionOutput(output=all_code_outputs, is_final_answer=False)
+
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the agent to a dictionary representation.
