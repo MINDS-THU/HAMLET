@@ -27,7 +27,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, List, Tuple
 import jinja2
 
 
@@ -184,6 +184,7 @@ def parse_code_blobs(text: str, code_block_tags: tuple[str, str]) -> str:
 
     Args:
         text (`str`): LLM's output text to parse.
+        code_block_tags (`Tuple[str, str]`): Tuple containing the opening and closing tags for code blocks.
 
     Returns:
         `str`: Extracted code block.
@@ -231,6 +232,232 @@ def parse_code_blobs(text: str, code_block_tags: tuple[str, str]) -> str:
             """
         ).strip()
     )
+
+
+def parse_several_code_blobs(text: str, code_block_tags: tuple[str, str]) -> Tuple[List[str], str, str]:
+    """Extract several code blocks, early stop strategy and code (or prompt) for early stopping from the LLM's output.
+
+    Args:
+        text (`str`): LLM's output text to parse.
+        code_block_tags (`Tuple[str, str]`): Tuple containing the opening and closing tags for code blocks.
+
+    Returns:
+        `Tuple[List[str], str, str]`: Extracted code blocks, early stop strategy and code (or prompt) for early stopping.
+
+    Raises:
+        ValueError: If no valid code block or early stop strategy or code (or prompt) for early stopping is found in the text.
+    """
+    code_pattern = rf"{code_block_tags[0]}\s*\n(.*?)\n{code_block_tags[1]}"
+    early_stop_strategy_pattern = r"Early Stop Strategy:\s*(\w+)"
+    early_stop_code_pattern = rf"Early Stop Code:\s*{code_block_tags[0]}\s*\n(.*?)\n{code_block_tags[1]}"
+    early_stop_prompt_pattern = r"Early Stop Prompt:\s*\"\"\"\s*(.*?)\s*\"\"\""
+
+    code_matches = re.findall(code_pattern, text, re.DOTALL)
+    if not code_matches:
+        code_matches = re.findall(r"```(?:python|py)\s*\n(.*?)\n```", text, re.DOTALL)
+    early_stop_strategy_match = re.search(early_stop_strategy_pattern, text)
+    early_stop_code_match = re.search(early_stop_code_pattern, text, re.DOTALL)
+    if not early_stop_code_match:
+        early_stop_code_match = re.search(r"Early Stop Code:\s*```(?:python|py)\s*\n(.*?)\n```", text, re.DOTALL)
+    early_stop_prompt_match = re.search(early_stop_prompt_pattern, text, re.DOTALL)
+
+    if code_matches and early_stop_code_match and early_stop_strategy_match and early_stop_strategy_match.group(1) == 'code':
+        code_matches = code_matches[:-1]  # Remove the last code block which is for early stopping
+
+    if not code_matches:
+        raise ValueError(
+            dedent(
+                f"""
+                Your code snippet is invalid, because the regex pattern {code_pattern} was not found in it.
+                Here is your output:
+                {text}
+                Make sure to include code with the correct pattern, for instance (single code block):
+                Thoughts: Your thoughts
+                Code:
+                {code_block_tags[0]}
+                # Your python code here
+                {code_block_tags[1]}
+
+                or (several code blocks):
+                Thoughts: Your thoughts
+                Code#1:
+                {code_block_tags[0]}
+                # Your first python code here
+                {code_block_tags[1]}
+                Code#2:
+                {code_block_tags[0]}
+                # Your second python code here
+                {code_block_tags[1]}
+                Early Stop Strategy: code
+                Early Stop Code:
+                {code_block_tags[0]}
+                # Your code for early stopping here
+                {code_block_tags[1]}
+                """
+            ).strip()
+        )
+    elif len(code_matches) == 1:
+        if early_stop_strategy_match or early_stop_code_match or early_stop_prompt_match:
+            raise ValueError(
+                dedent(
+                    f"""
+                    You provided a single code block, but also specified an early stop strategy or code (or prompt) for early stopping.
+                    Here is your output:
+                    {text}
+                    Don't specify an early stop strategy when providing a single code block, for instance:
+                    Thoughts: Your thoughts
+                    Code:
+                    {code_block_tags[0]}
+                    # Your python code here
+                    {code_block_tags[1]}
+
+                    If you want to specify an early stop strategy, make sure to include several code blocks, for instance:
+                    Thoughts: Your thoughts
+                    Code#1:
+                    {code_block_tags[0]}
+                    # Your first python code here
+                    {code_block_tags[1]}
+                    Code#2:
+                    {code_block_tags[0]}
+                    # Your second python code here
+                    {code_block_tags[1]}
+                    Early Stop Strategy: code
+                    Early Stop Code:
+                    {code_block_tags[0]}
+                    # Your code for early stopping here
+                    {code_block_tags[1]}
+                    """
+                ).strip()
+            )
+        else:
+            return code_matches, None, None
+    else:
+        if not early_stop_strategy_match:
+            raise ValueError(
+                dedent(
+                    f"""
+                    You provided several code blocks, but you did not specify the early stop strategy to use or specified with a wrong format. The regex pattern {early_stop_strategy_pattern} was not found in it.
+                    Here is your output:
+                    {text}
+                    Make sure to include the early stop strategy with the correct pattern, for instance:
+                    Thoughts: Your thoughts
+                    Code#1:
+                    {code_block_tags[0]}
+                    # Your first python code here
+                    {code_block_tags[1]}
+                    Code#2:
+                    {code_block_tags[0]}
+                    # Your second python code here
+                    {code_block_tags[1]}
+                    Early Stop Strategy: code
+                    Early Stop Code:
+                    {code_block_tags[0]}
+                    # Your code for early stopping here
+                    {code_block_tags[1]}
+                    """
+                ).strip()
+            )
+        else:
+            if early_stop_strategy_match.group(1) == 'code':
+                if not early_stop_code_match:
+                    raise ValueError(
+                        dedent(
+                            f"""
+                            You provided several code blocks and specified the early stop strategy to be 'code', but you did not provide the code for early stopping or provided with a wrong format. The regex pattern {early_stop_code_pattern} was not found in it.
+                            Here is your output:
+                            {text}
+                            Make sure to include the code for early stopping, for instance:
+                            Thoughts: Your thoughts
+                            Code#1:
+                            {code_block_tags[0]}
+                            # Your first python code here
+                            {code_block_tags[1]}
+                            Code#2:
+                            {code_block_tags[0]}
+                            # Your second python code here
+                            {code_block_tags[1]}
+                            Early Stop Strategy: code
+                            Early Stop Code:
+                            {code_block_tags[0]}
+                            # Your code for early stopping here
+                            {code_block_tags[1]}
+                            """
+                        ).strip()
+                    )
+                return code_matches, early_stop_strategy_match.group(1), early_stop_code_match.group(1).strip()
+            elif early_stop_strategy_match.group(1) == "prompt":
+                if not early_stop_prompt_match:
+                    raise ValueError(
+                        dedent(
+                            f"""
+                            You provided several code blocks and specified the early stop strategy to be 'prompt', but you did not provide the prompt for early stopping or provided with a wrong format. The regex pattern {early_stop_prompt_pattern} was not found in it.
+                            Here is your output:
+                            {text}
+                            Make sure to include the prompt for early stopping, for instance:
+                            Thoughts: Your thoughts
+                            Code#1:
+                            {code_block_tags[0]}
+                            # Your first python code here
+                            {code_block_tags[1]}
+                            Code#2:
+                            {code_block_tags[0]}
+                            # Your second python code here
+                            {code_block_tags[1]}
+                            Early Stop Strategy: prompt
+                            Early Stop Prompt: \"\"\"
+                            # Your prompt for early stopping here
+                            \"\"\"
+                            """
+                        ).strip()
+                    )
+                return code_matches, early_stop_strategy_match.group(1), early_stop_prompt_match.group(1).strip()
+            elif early_stop_strategy_match.group(1) == "none":
+                if early_stop_code_match or early_stop_prompt_match:
+                    raise ValueError(
+                        dedent(
+                            f"""
+                            You provided several code snippets, and specified the early stop strategy to be 'none', but you also provided code (or prompt) for early stopping.
+                            Here is your output:
+                            {text}
+                            Specifying the early stop strategy as 'none' means that you want to gather all code execution results without any early stopping. Don't provide code (or prompt) for early stopping when the early stop strategy is 'none', for instance:
+                            Thoughts: Your thoughts
+                            Code#1:
+                            {code_block_tags[0]}
+                            # Your first python code here
+                            {code_block_tags[1]}
+                            Code#2:
+                            {code_block_tags[0]}
+                            # Your second python code here
+                            {code_block_tags[1]}
+                            Early Stop Strategy: none
+                            """
+                        ).strip()
+                    )
+                return code_matches, early_stop_strategy_match.group(1), None
+            else:
+                raise ValueError(
+                    dedent(
+                        f"""
+                        You provided several code snippets, but the early stop strategy you specified is not valid. The valid options are 'code', 'prompt' and 'none'.
+                        Here is your output:
+                        {text}
+                        Make sure to include a valid early stop strategy, for instance:
+                        Thoughts: Your thoughts
+                        Code#1:
+                        {code_block_tags[0]}
+                        # Your first python code here
+                        {code_block_tags[1]}
+                        Code#2:
+                        {code_block_tags[0]}
+                        # Your second python code here
+                        {code_block_tags[1]}
+                        Early Stop Strategy: prompt
+                        Early Stop Prompt: \"\"\"
+                        # Your prompt for early stopping here
+                        \"\"\"
+                        """
+                    ).strip()
+                )
 
 
 MAX_LENGTH_TRUNCATE_CONTENT = 20000

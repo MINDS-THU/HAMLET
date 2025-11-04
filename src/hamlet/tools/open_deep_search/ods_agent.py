@@ -76,10 +76,10 @@ class OpenDeepSearchAgent:
         self.system_prompt = system_prompt
 
         # Configure LiteLLM with OpenAI base URL if provided
-        self.base_url = os.environ.get("OPENAI_BASE_URL")
+        self.base_url = os.environ.get("OPENAI_API_BASE")
         self.api_key = os.environ.get("OPENAI_API_KEY")
         if not self.base_url or not self.api_key:
-            raise ValueError("OPENAI_BASE_URL and OPENAI_API_KEY environment variables must be set.")
+            raise ValueError("OPENAI_API_BASE and OPENAI_API_KEY environment variables must be set.")
         # utils.set_provider_config("openai", {"base_url": self.base_url})
 
     async def search_and_build_context(
@@ -116,6 +116,14 @@ class OpenDeepSearchAgent:
             pro_mode
         )
 
+        # print("DEBUG: processed_sources type:", type(processed_sources))
+        # if hasattr(processed_sources, "error"):
+        #     print("DEBUG: processed_sources.error:", processed_sources.error)
+        # if hasattr(processed_sources, "data"):
+        #     print("DEBUG: processed_sources.data is None?:", processed_sources.data is None)
+        # else:
+        #     print("DEBUG: processed_sources (raw):", processed_sources)
+
         # Build and return context
         return build_context(processed_sources)
 
@@ -143,6 +151,7 @@ class OpenDeepSearchAgent:
         """
         # Get context from search results
         context = await self.search_and_build_context(query, max_sources, pro_mode)
+        print(f'{"="*10} Context Built {"="*10}\n{context.strip()}\n{"="*30}')
         # Prepare messages for the LLM
         messages = [
             {"role": "system", "content": self.system_prompt},

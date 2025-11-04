@@ -2,7 +2,7 @@ import torch
 import requests
 import json
 from typing import List
-from default_tools.open_deep_search.ranking_models.base_reranker import BaseSemanticSearcher
+from .base_reranker import BaseSemanticSearcher
 
 class InfinitySemanticSearcher(BaseSemanticSearcher):
     """

@@ -12,9 +12,9 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from crawl4ai.content_filter_strategy import PruningContentFilter
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 
-from default_tools.open_deep_search.context_scraping.extraction_result import ExtractionResult, print_extraction_result
-from default_tools.open_deep_search.context_scraping.basic_web_scraper import ExtractionConfig
-from default_tools.open_deep_search.context_scraping.strategy_factory import StrategyFactory
+from ..context_scraping.extraction_result import ExtractionResult, print_extraction_result
+from ..context_scraping.basic_web_scraper import ExtractionConfig
+from ..context_scraping.strategy_factory import StrategyFactory
 
 class WebScraper:
     """Unified scraper that encapsulates all extraction strategies and configuration"""
@@ -34,22 +34,31 @@ class WebScraper:
         self.llm_instruction = llm_instruction
         self.user_query = user_query
         self.filter_content = filter_content
-        
+
         # Validate strategies
         valid_strategies = {'markdown_llm', 'html_llm', 'fit_markdown_llm', 'css', 'xpath', 'no_extraction', 'cosine'}
         invalid_strategies = set(self.strategies) - valid_strategies
         if invalid_strategies:
             raise ValueError(f"Invalid strategies: {invalid_strategies}")
-            
+
         # Initialize strategy map
+        # self.strategy_map = {
+        #     'markdown_llm': lambda: self.factory.create_llm_strategy('markdown', self.llm_instruction),
+        #     'html_llm': lambda: self.factory.create_llm_strategy('html', self.llm_instruction),
+        #     'fit_markdown_llm': lambda: self.factory.create_llm_strategy('fit_markdown', self.llm_instruction),
+        #     'css': self.factory.create_css_strategy,
+        #     'xpath': self.factory.create_xpath_strategy,
+        #     'no_extraction': self.factory.create_no_extraction_strategy,
+        #     'cosine': lambda: self.factory.create_cosine_strategy(debug=self.debug)
+        # }
         self.strategy_map = {
-            'markdown_llm': lambda: self.factory.create_llm_strategy('markdown', self.llm_instruction),
-            'html_llm': lambda: self.factory.create_llm_strategy('html', self.llm_instruction),
-            'fit_markdown_llm': lambda: self.factory.create_llm_strategy('fit_markdown', self.llm_instruction),
-            'css': self.factory.create_css_strategy,
-            'xpath': self.factory.create_xpath_strategy,
-            'no_extraction': self.factory.create_no_extraction_strategy,
-            'cosine': lambda: self.factory.create_cosine_strategy(debug=self.debug)
+            "markdown_llm": ("llm", "markdown"),
+            "html_llm": ("llm", "html"),
+            "fit_markdown_llm": ("llm", "fit_markdown"),
+            "css": ("css",),
+            "xpath": ("xpath",),
+            "no_extraction": ("no_extraction",),
+            "cosine": ("cosine",),
         }
 
     def _create_crawler_config(self) -> CrawlerRunConfig:
@@ -71,7 +80,7 @@ class WebScraper:
         """
         # Handle Wikipedia URLs
         if 'wikipedia.org/wiki/' in url:
-            from default_tools.open_deep_search.context_scraping.utils import get_wikipedia_content
+            from .utils import get_wikipedia_content
             try:
                 content = get_wikipedia_content(url)
                 # Create same result for all strategies since we're using Wikipedia content
@@ -90,9 +99,16 @@ class WebScraper:
         # Normal scraping for non-Wikipedia URLs or if Wikipedia extraction failed
         results = {}
         for strategy_name in self.strategies:
+            kind = self.strategy_map[strategy_name]
+            if kind[0] == 'llm':
+                _strategy = self.factory.create_llm_strategy(kind[1], self.llm_instruction)
+            elif kind[0] == 'css':
+                _strategy = self.factory.create_css_strategy()
+            elif kind[0] == 'cosine':
+                _strategy = self.factory.create_cosine_strategy(debug=self.debug)
             config = ExtractionConfig(
                 name=strategy_name,
-                strategy=self.strategy_map[strategy_name]()
+                strategy=_strategy
             )
             result = await self.extract(config, url)
             results[strategy_name] = result
@@ -160,12 +176,12 @@ class WebScraper:
                             content = result.extracted_content
                     
                     if self.filter_content and content:
-                        from default_tools.open_deep_search.context_scraping.utils import filter_quality_content
+                        from .utils import filter_quality_content
                         content = filter_quality_content(content)
                 else:
                     content = result.extracted_content
                     if self.filter_content and content:
-                        from default_tools.open_deep_search.context_scraping.utils import filter_quality_content
+                        from .utils import filter_quality_content
                         content = filter_quality_content(content)
 
             if self.debug:
