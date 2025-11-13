@@ -51,7 +51,7 @@ system_prompt: |-
     Early Stop Code:
     {{code_block_opening_tag}}
     # Check if the results contain at least 3 paper links
-    check_result = (results.count("http") + results.count("https")) >= 3
+    early_stop_result = results.count("http") >= 3
     {{code_block_closing_tag}}
 
     ---
