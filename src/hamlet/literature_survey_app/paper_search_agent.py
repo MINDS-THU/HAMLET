@@ -1,3 +1,4 @@
+import json
 from src.hamlet.core.agents import CodeAgent
 from src.hamlet.core.monitoring import LogLevel
 import yaml
@@ -98,7 +99,11 @@ if __name__ == "__main__":
         verbosity_level=LogLevel.DEBUG,
         )
     # agent.run("I am interested in papers that uses LLM to automate or assist the construction of simulation, especially discrete-event simulation.")
-    agent.run("I am interested in recent papers on large language models for robotics.")
+    full_results = agent.run("I am interested in recent papers on large language models for robotics. Use Early Stop Strategy 'code'.", return_full_result=True)
+
+    # with open("src/hamlet/literature_survey_app/paper_search_agent_result_code.json", "w") as f:
+    #     json.dump(full_results.steps, f, indent=2)
+
     """
     ssh -vvv -N -R 7890:localhost:7890 -p 2227 lijinbo@166.111.59.11
     export http_proxy=http://127.0.0.1:7890

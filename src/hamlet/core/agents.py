@@ -1439,10 +1439,13 @@ class CodeAgent(MultiStepAgent):
                                 execution_outputs_console += [
                                     Text(f"Executing parsed early stop code for Code#{idx+1} ({len(code_actions)} in total)...", style="bold")
                                 ]
-                                early_stop_details += "\nfinal_answer(early_stop_result)"
+                                early_stop_code = early_stop_details + "\nfinal_answer(early_stop_result)"
                                 self.python_executor.state = code_output.executor_state
-                                # print(self.python_executor.state)
-                                current_step_finished = self.python_executor(early_stop_details.strip()).output
+                                """
+                                Close matches is used to avoid issues with variable names.
+                                For example, although 'result_2' is not defined before, it will match 'result_1' in the actual execution result in early stop code.
+                                """
+                                current_step_finished = self.python_executor(early_stop_code.strip()).output
                                 if isinstance(current_step_finished, str):
                                     current_step_finished = "True" in current_step_finished.strip() or "true" in current_step_finished.strip()
                             except Exception as e:

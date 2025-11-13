@@ -8,6 +8,7 @@ wheels/
 **/agent_configs
 mytest.py
 paper_search_working_dir/
+src/hamlet/literature_survey_app/*.json
 # Virtual environments
 **/.ruff_cache/
 .venv
