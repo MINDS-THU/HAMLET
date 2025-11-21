@@ -7,6 +7,8 @@ wheels/
 *.egg-info
 **/agent_configs
 mytest.py
+src/hamlet/core/agents_type_valid.py
+src/hamlet/core/prompts/code_agent_type_valid.yaml
 paper_search_working_dir/
 src/hamlet/literature_survey_app/*.json
 # Virtual environments
