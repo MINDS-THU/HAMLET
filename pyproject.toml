@@ -18,6 +18,7 @@ dependencies = [
   "openai>=1.58.1",
   "datasets==4.1.1",
   "pathvalidate>=3.3.1",
+  "pydantic",
 ]
 
 [project.scripts]

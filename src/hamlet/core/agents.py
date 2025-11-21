@@ -26,7 +26,9 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Literal, Type, TypeAlias, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, Literal, Tuple, Type, TypeAlias, TypedDict, Union
+from textwrap import dedent
+from pydantic import BaseModel
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 
 import yaml
@@ -42,7 +44,7 @@ from rich.text import Text
 if TYPE_CHECKING:
     import PIL.Image
 
-from .agent_types import handle_agent_output_types
+from .agent_types import handle_agent_output_types, AgentText
 from .local_python_executor import BASE_BUILTIN_MODULES, LocalPythonExecutor, PythonExecutor, fix_final_answer_code, CodeOutput
 from .memory import (
     ActionStep,
@@ -79,6 +81,7 @@ from .utils import (
     AgentGenerationError,
     AgentMaxStepsError,
     AgentParsingError,
+    BASIC_DATA_TYPES,
     create_agent_gradio_app_template,
     extract_code_from_text,
     is_valid_name,
@@ -98,6 +101,19 @@ def populate_template(template: str, variables: dict[str, Any]) -> str:
         return compiled_template.render(**variables)
     except Exception as e:
         raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
+
+def get_fields_info(model: BaseModel, indent=0):
+    lines = []
+    for name, field in model.model_fields.items():
+        field_desc = field.description or name
+        prefix = "  " * indent + f"- {name}:"
+        if hasattr(field.annotation, "model_fields"):
+            lines.append(f"{prefix} ")
+            lines.extend(get_fields_info(field.annotation, indent + 1))
+        else:
+            type_name = field.annotation.__name__ if hasattr(field.annotation, "__name__") else str(field.annotation)
+            lines.append(f"{prefix} {type_name} ({field_desc})")
+    return lines
 
 
 @dataclass
@@ -268,6 +284,10 @@ class MultiStepAgent(ABC):
         model (`Callable[[list[dict[str, str]]], ChatMessage]`): Model that will generate the agent's actions.
         prompt_templates ([`~agents.PromptTemplates`], *optional*): Prompt templates.
         instructions (`str`, *optional*): Custom instructions for the agent, will be inserted in the system prompt.
+        input_schema (`Any`, *optional*): Schema for validating structured input.
+            If provided, agent will only accept structured input matching this schema.
+        output_schema (`Any`, *optional*): Schema for validating structured output.
+            If provided, agent will ensure output matches this schema.
         max_steps (`int`, default `20`): Maximum number of steps the agent can take to solve the task.
         verbosity_level (`LogLevel`, default `LogLevel.INFO`): Level of verbosity of the agent's logs.
         managed_agents (`list`, *optional*): Managed agents that the agent can call.
@@ -289,6 +309,8 @@ class MultiStepAgent(ABC):
         model: Model,
         prompt_templates: PromptTemplates | None = None,
         instructions: str | None = None,
+        input_schema: Any = None,
+        output_schema: Any = None,
         max_steps: int = 20,
         verbosity_level: LogLevel = LogLevel.INFO,
         managed_agents: list | None = None,
@@ -326,6 +348,18 @@ class MultiStepAgent(ABC):
         self.final_answer_checks = final_answer_checks if final_answer_checks is not None else []
         self.return_full_result = return_full_result
         self.instructions = instructions
+
+        if input_schema is not None and not isinstance(input_schema, type):
+            raise TypeError(f"Input_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {type(input_schema)}")
+        if input_schema is not None and not (issubclass(input_schema, BaseModel) or (input_schema in BASIC_DATA_TYPES)):
+            raise TypeError(f"Input_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {input_schema}")
+        if output_schema is not None and not isinstance(output_schema, type):
+            raise TypeError(f"Output_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {type(output_schema)}")
+        if output_schema is not None and not (issubclass(output_schema, BaseModel) or (output_schema in BASIC_DATA_TYPES)):
+            raise TypeError(f"Output_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {output_schema}")
+        self.input_schema = input_schema
+        self.output_schema = output_schema
+
         self._setup_managed_agents(managed_agents)
         self._setup_tools(tools)
         self._validate_tools_and_managed_agents(tools, managed_agents)
@@ -423,6 +457,7 @@ class MultiStepAgent(ABC):
         additional_args: dict | None = None,
         max_steps: int | None = None,
         return_full_result: bool | None = None,
+        structured_input: Any = None,
     ) -> Any | RunResult:
         """
         Run the agent for the given task.
@@ -438,7 +473,8 @@ class MultiStepAgent(ABC):
             max_steps (`int`, *optional*): Maximum number of steps the agent can take to solve the task. if not provided, will use the agent's default value.
             return_full_result (`bool`, *optional*): Whether to return the full [`RunResult`] object or just the final answer output.
                 If `None` (default), the agent's `self.return_full_result` setting is used.
-
+            structured_input (Any, *optional*): Structured input data that matches the agent's input_schema. 
+                If input_schema is defined, this must be provided and match the schema.
         Example:
         ```py
         from hamlet import CodeAgent
@@ -449,11 +485,16 @@ class MultiStepAgent(ABC):
         max_steps = max_steps or self.max_steps
         self.task = task
         self.interrupt_switch = False
+        self.validate_input(structured_input)
+
         if additional_args:
             self.state.update(additional_args)
-            self.task += f"""
-You have been provided with these additional arguments, that you can access directly using the keys as variables:
-{str(additional_args)}."""
+            self.task += dedent(
+                f"""
+                You have been provided with these additional arguments, that you can access directly using the keys as variables: 
+                {str(additional_args)}.
+                """
+            )
 
         self.memory.system_prompt = SystemPromptStep(system_prompt=self.system_prompt)
         if reset:
@@ -567,8 +608,8 @@ You have been provided with these additional arguments, that you can access dire
                             level=LogLevel.INFO,
                         )
 
-                        if self.final_answer_checks:
-                            self._validate_final_answer(final_answer)
+                        if self.final_answer_checks or self.output_schema:
+                            final_answer = self._validate_final_answer(final_answer)
                         returned_final_answer = True
                         action_step.is_final_answer = True
 
@@ -586,20 +627,42 @@ You have been provided with these additional arguments, that you can access dire
 
         if not returned_final_answer and self.step_number == max_steps + 1:
             final_answer, final_memory_step = self._handle_max_steps_reached(task)
+            if self.output_schema is not None:
+                if issubclass(self.output_schema, BaseModel):
+                    schema_str = get_fields_info(self.output_schema)
+                    if isinstance(final_answer, dict):
+                        try:
+                            final_answer = self.output_schema.model_validate(final_answer)
+                        except Exception as e:
+                            raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
+                    else:
+                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
+                else:
+                    if not isinstance(final_answer, self.output_schema):
+                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
             self.logger.log_markdown(
-                content=final_answer or "",
+                content=str(final_answer) or "",
                 title="Final answer given by LLM when max steps reached:",
                 level=LogLevel.DEBUG,
             )
             yield final_memory_step
-        yield FinalAnswerStep(handle_agent_output_types(final_answer))
+        
+        if self.output_schema is not None:
+            yield FinalAnswerStep(final_answer)
+        else:
+            yield FinalAnswerStep(handle_agent_output_types(final_answer))
+
 
     def _validate_final_answer(self, final_answer: Any):
+        validate_passed, details = self.validate_output(final_answer)
+        if not validate_passed:
+            raise AgentError(details, self.logger)
         for check_function in self.final_answer_checks:
             try:
                 assert check_function(final_answer, self.memory)
             except Exception as e:
                 raise AgentError(f"Check {check_function.__name__} failed with error: {e}", self.logger)
+        return details
 
     def _finalize_step(self, memory_step: ActionStep | PlanningStep):
         memory_step.timing.end_time = time.time()
@@ -607,7 +670,17 @@ You have been provided with these additional arguments, that you can access dire
 
     def _handle_max_steps_reached(self, task: str) -> Any:
         action_step_start_time = time.time()
-        final_answer = self.provide_final_answer(task)
+        try:
+            final_answer = self.provide_final_answer(task)
+        except Exception as e:
+            raise AgentGenerationError(f"Reached max steps. And an error occurred when generating final answer: {e}", self.logger)
+        try:
+            final_code_action = parse_several_code_blobs(final_answer.content, self.code_block_tags)
+        except Exception:
+            raise AgentParsingError("Reached max steps. And an error occurred when parsing code blocks from final answer.", self.logger)
+        if "final_answer(" not in final_code_action:
+            raise AgentParsingError("Reached max steps. And call of FinalAnswerTool is not found in the model output.", self.logger)
+        final_output = self.python_executor(final_code_action)
         final_memory_step = ActionStep(
             step_number=self.step_number,
             error=AgentMaxStepsError("Reached max steps.", self.logger),
@@ -617,7 +690,7 @@ You have been provided with these additional arguments, that you can access dire
         final_memory_step.action_output = final_answer.content
         self._finalize_step(final_memory_step)
         self.memory.steps.append(final_memory_step)
-        return final_answer.content, final_memory_step
+        return final_output, final_memory_step
 
     def _generate_planning_step(
         self, task, is_first_step: bool, step: int
@@ -732,6 +805,99 @@ You have been provided with these additional arguments, that you can access dire
             messages.extend(memory_step.to_messages(summary_mode=summary_mode))
         return messages
 
+    def get_output_instructions(self) -> str:
+        """
+        Returns instructions for the agent to produce output matching the output schema.
+        """
+        if self.output_schema:
+            if hasattr(self.output_schema, "__name__") and hasattr(self.output_schema, "model_fields"):
+                # schema_name = self.output_schema.__name__
+                fields_info = get_fields_info(self.output_schema)
+                fields_info_str = "\n".join(fields_info)
+                structured_output_instructions = dedent(
+                    f"""
+                    Strictly follow the structured output instructions below:
+                    Your final answer must be outputted in the dict format. Please only output valid dict objects, do not include any additional text.
+                    Ensuring all necessary keys are included and have the values of the correct type:
+                    {fields_info_str}
+                    """
+                )
+            else:
+                type_name = self.output_schema.__name__ if hasattr(self.output_schema, "__name__") else str(self.output_schema)
+                structured_output_instructions = dedent(
+                    f"""
+                    Strictly follow the structured output instructions below:
+                    Your final answer must be outputted as an object of type {type_name}. 
+                    Please output only a valid {type_name} object, do not include any additional text or explanation.
+                    """
+                )
+            return structured_output_instructions
+        return ""
+
+    def validate_input(self, structured_input: Any) -> None:
+        """
+        Validates the structured input against the agent's input schema. 
+        If the input is valid, add the structured input to the agent's python executor state. 
+        If not, raises a ValueError.
+        Args:
+            structured_input (Any): Structured input data to validate.
+        """
+        if self.input_schema is not None:
+            if structured_input is None:
+                raise ValueError(f"structured_input is required for this agent with input_schema: {self.input_schema.__name__}")
+            if issubclass(self.input_schema, BaseModel):
+                try:
+                    if isinstance(structured_input, self.input_schema):
+                        validated_input_data = structured_input
+                    else:
+                        validated_input_data = self.input_schema(**structured_input)
+                except Exception as e:
+                    raise TypeError(f"structured_input does not match input_schema: {e}")
+                validated_dict = validated_input_data.model_dump()
+                self.state.update(validated_dict)
+                self.task += dedent(
+                    f"""
+                    You have been provided with structured input data, which you can access as variables:
+                    {validated_dict}
+                    """
+                )
+            else:
+                if not isinstance(structured_input, self.input_schema):
+                    raise TypeError(f"structured_input must be of type {self.input_schema.__name__}, got {type(structured_input).__name__}")
+                self.state["structured_input"] = structured_input
+                self.task += dedent(
+                    f"""
+                    You have been provided with structured input data (type: {self.input_schema.__name__}), which you can access using the variable 'structured_input': {structured_input}
+                    """
+                )
+
+    def validate_output(self, output: Any) -> Tuple[bool, str | None]:
+        """
+        Validates the output against the agent's output schema.
+        Args:
+            output (Any): Output data to validate.
+        Returns:
+            Tuple[bool, str | None]: A tuple where the first element is a boolean indicating whether the output is valid,
+            and the second element is an error message if the output is not valid, or None if it is valid.
+        """
+        if self.output_schema is not None:
+            if issubclass(self.output_schema, BaseModel):
+                schema_str = get_fields_info(self.output_schema)
+                if isinstance(output, dict):
+                    try:
+                        output = self.output_schema.model_validate(output)
+                        return True, output
+                    except Exception as e:
+                        return False, f"Validation failed for the output. It must be a dict with necessary keys and values of correct types:\n{schema_str}"
+                else:
+                    return False, f"Output must be a dict with necessary keys and values of correct types:\n{schema_str}"
+            else:
+                if isinstance(output, self.output_schema):
+                    return True, output
+                else:
+                    return False, f"Output must be of type {self.output_schema.__name__}"
+        return True, None
+
     def _step_stream(
         self, memory_step: ActionStep
     ) -> Generator[ChatMessageStreamDelta | ToolCall | ToolOutput | ActionOutput]:
@@ -793,15 +959,21 @@ You have been provided with these additional arguments, that you can access dire
             )
         ]
         messages += self.write_memory_to_messages()[1:]
+
+        post_prompt = populate_template(
+            self.prompt_templates["final_answer"]["post_messages"],
+            variables={"task": task},
+        )
+        if self.output_schema:
+            post_prompt += "\n\n" + self.get_output_instructions()
+
         messages.append(
             ChatMessage(
                 role=MessageRole.USER,
                 content=[
                     {
                         "type": "text",
-                        "text": populate_template(
-                            self.prompt_templates["final_answer"]["post_messages"], variables={"task": task}
-                        ),
+                        "text": post_prompt,
                     }
                 ],
             )
@@ -810,10 +982,11 @@ You have been provided with these additional arguments, that you can access dire
             chat_message: ChatMessage = self.model.generate(messages)
             return chat_message
         except Exception as e:
-            return ChatMessage(
-                role=MessageRole.ASSISTANT,
-                content=[{"type": "text", "text": f"Error in generating final LLM output: {e}"}],
-            )
+            # return ChatMessage(
+            #     role=MessageRole.ASSISTANT,
+            #     content=[{"type": "text", "text": f"Error in generating final LLM output: {e}"}],
+            # )
+            raise AgentGenerationError(f"Error in generating final LLM output: {e}", self.logger)
 
     def visualize(self):
         """Creates a rich tree visualization of the agent's structure."""
@@ -1179,6 +1352,8 @@ class CodeAgent(MultiStepAgent):
         tools: list[Tool],
         model: Model,
         prompt_templates: PromptTemplates | None = None,
+        input_schema: Any = None,
+        output_schema: Any = None,
         additional_authorized_imports: list[str] | None = None,
         planning_interval: int | None = None,
         executor_type: Literal["local", "e2b", "modal", "docker", "wasm"] = "local",
@@ -1215,6 +1390,8 @@ class CodeAgent(MultiStepAgent):
             tools=tools,
             model=model,
             prompt_templates=prompt_templates,
+            input_schema=input_schema,
+            output_schema=output_schema,
             planning_interval=planning_interval,
             **kwargs,
         )
@@ -1276,6 +1453,11 @@ class CodeAgent(MultiStepAgent):
                 "code_block_closing_tag": self.code_block_tags[1],
             },
         )
+
+        # if output_schema is provided, add structured output instructions to system prompt
+        if self.output_schema:
+            system_prompt += f'\n\n{self.get_output_instructions()}'
+        # print(system_prompt)
         return system_prompt
 
     def _step_stream(
@@ -1644,6 +1826,8 @@ class CodeAgent(MultiStepAgent):
             "executor_kwargs": agent_dict.get("executor_kwargs"),
             "max_print_outputs_length": agent_dict.get("max_print_outputs_length"),
             "code_block_tags": agent_dict.get("code_block_tags"),
+            "input_schema": agent_dict.get("input_schema"),
+            "output_schema": agent_dict.get("output_schema"),
         }
         # Filter out None values
         code_agent_kwargs = {k: v for k, v in code_agent_kwargs.items() if v is not None}

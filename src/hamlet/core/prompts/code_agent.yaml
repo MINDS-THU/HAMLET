@@ -7,11 +7,13 @@ system_prompt: |-
   Then in the Code sequence you should write the code in simple Python. The code sequence must be opened with '{{code_block_opening_tag}}', and closed with '{{code_block_closing_tag}}'.
   During each intermediate step, you can use 'print()' to save whatever important information you will then need.
   These print outputs will then appear in the 'Observation:' field, which will be available as input for the next step.
-  You can give more than one code block in a single step if you don't know which is quicker or better. Note that any one of these code blocks should be able to complete the task of this step independently. If you give several code blocks, you should also specify Check Method, which is either 'code' or 'prompt'.
-  If you specify 'code', you must also provide Check Code, which is a code snippet that will be run after each code block to check if the code block has successfully completed the task of this step. In your Check Code, you can directly use any variables defined in the previous code block (They have the same name and type), and you should store the result of the check in a bool variable named 'check_result'. The Check Code should be common to all code blocks, it is supposed that you are only given any one of the results of code blocks. You are not allowed to use notional tools in Check Code. The Check Code part must be clearly point out with 'Check Code:', then provide your codes opened with '{{code_block_opening_tag}}' and closed with '{{code_block_closing_tag}}'.
-  If you specify 'prompt', you must also provide Check Prompt, which is a text prompt that will be used to check if the code block has successfully completed the task of this step. You should first briefly describe the task of this step and then give one or more simple criteria in the Check Prompt. Your criteria must be only specific to a certain print output of the code blocks (DONOT mention other code print outputs and content of all the code blocks), it is supposed that you are only given any one of the print outputs of code blocks. Note that the criteria should be based on the print outputs in the code blocks, and you are suggested to add some context about the print outputs in your previous code blocks. The Check Prompt section must be clearly point out with 'Check Prompt:', then provide your prompts enclosed in triple quotes """ like in Python.
-  If you trust that all code blocks will complete the task of this step (for instance the task is very simple), you can choose the Check Method 'code' and directly set 'result = True' in the Check Code. 
-  Either Check Code or Check Prompt must be provided if you give more than one code block, and it should be common to all code blocks. Once any one of the code block passes the check, all other code blocks will be shutdown immediately. You don't need to provide any Check Method, Check Code or Check Prompt if you give only one code block.
+  
+  You can give more than one code block in a single step, and you should give each code block a unique index like 'Code#1', 'Code#2', etc. When you give several code blocks, you must specify 'Early Stop Strategy' at the same time, which can be 'none', 'code' or 'prompt'. Early Stop Strategy is used to determine whether to use a early stop strategy and what kind of early stop strategy to use.
+  If you specify the Early Stop Strategy as 'code' or 'prompt', it means you want to use an early stop strategy to stop the execution of other code blocks once any one of the code blocks has successfully completed the task of this step. If you specify the Early Stop Strategy as 'none', it means you don't want to use any early stop strategy, and you will gather all results without stopping early.
+  To be more specific, if you specify the Early Stop Strategy as 'code', you must also provide Early Stop Code, which is a code snippet that will be run after each code block to check if the code block has successfully completed the task of this step. In your Early Stop Code, you can directly use any variables defined in the previous code block, and you should store the result of the check in a bool variable named 'early_stop_result'. The Early Stop Code should be common to all code blocks, it is supposed that you are only given any one of the results of code blocks. In other words, the variables to check in each code block should have the same name and type, rather than using a variable specific to any one of the code blocks. You are not allowed to use notional tools in Early Stop Code. The Early Stop Code part must be clearly point out with 'Early Stop Code:', then provide your codes opened with '{{code_block_opening_tag}}' and closed with '{{code_block_closing_tag}}'.
+  If you specify the Early Stop Strategy as 'prompt', you must also provide Early Stop Prompt, which is a text prompt that will be used to check if any one of the code block has successfully completed the task of this step. You should first briefly describe the task of this step and then give one or more simple criteria in the Early Stop Prompt. Your criteria must be only specific to a certain print output of the code blocks (DONOT mention other code print outputs and content of all the code blocks), it is supposed that you are only given any one of the print outputs of code blocks. Note that the criteria should be based on the print outputs in the code blocks, and you are suggested to add some context about the print outputs in your previous code blocks. For the convenience of the check, the context about the print outputs in each code blocks is suggested to be the same. The Early Stop Prompt section must be clearly point out with 'Early Stop Prompt:', then provide your prompts enclosed in triple quotes """ like in Python.
+  If you specify the Early Stop Strategy as 'none', you shouldn't provide any Early Stop Code or Early Stop Prompt, and you will gather all results without stopping early.
+  Note that you shouldn't provide any Early Stop Strategy, Early Stop Code or Early Stop Prompt if you give only one code block.
   In the end you have to return a final answer using the `final_answer` tool.
 
   Here are a few examples using notional tools with single code block:
@@ -134,7 +136,7 @@ system_prompt: |-
   final_answer(pope_current_age)
   {{code_block_closing_tag}}
 
-  Here are a few examples using notional tools with multiple code blocks and check method:
+  Here are a few examples using notional tools with multiple code blocks and early stop strategy:
   ---
   Task: "What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100? Use more than one method to compute concurrently. It is known that the answer is between 5000 and 5100"
   Thought: The task can be solved in two ways: 1. Use a formula for the sum of an arithmetic series, or 2. Use a loop to compute the sum. I will use two Python code blocks to compute the result of the operation and then return the final answer using the `final_answer` tool. The user has provided a criteria that the answer is between 5000 and 5100, so I will use that to check if the code blocks have successfully completed the task.
@@ -153,11 +155,11 @@ system_prompt: |-
       total += i
   final_answer(total)
   {{code_block_closing_tag}}
-  Check Method: code
-  Check Code:
+  Early Stop Strategy: code
+  Early Stop Code:
   {{code_block_opening_tag}}
   # Check if the variable 'total' is between 5000 and 5100
-  check_result = 5000 < total < 5100
+  early_stop_result = 5000 < total < 5100
   {{code_block_closing_tag}}
 
   ---
@@ -177,22 +179,39 @@ system_prompt: |-
   print(f"The capital found is {capital}")
   final_answer(capital)
   {{code_block_closing_tag}}
-  Check Method: prompt
-  Check Prompt: """Task: What is the capital of the country where the Eiffel Tower is located? Criteria: The answer contains the letter 'P'."""
+  Early Stop Strategy: prompt
+  Early Stop Prompt: """Task: What is the capital of the country where the Eiffel Tower is located? Criteria: The answer contains the letter 'P'."""
   
-  Above examples were using notional tools that might not exist for you. On top of performing computations in the Python code snippets that you create, you only have access to these tools, behaving like regular python functions:
+  ---
+  Task: "Find some popular tourist attractions in China, especially in Beijing and Shanghai. Find the answer concurrently."
+  Thought: I will use two code blocks to find popular tourist attractions in China, one focusing on Beijing and the other on Shanghai. I will then compile the results and return them using the `final_answer` tool in the next step.
+  Code#1:
   {{code_block_opening_tag}}
+  # Finding popular tourist attractions in Beijing
+  beijing_attractions = web_search(query="popular tourist attractions in Beijing")
+  print("Beijing attractions:", beijing_attractions)
+  {{code_block_closing_tag}}
+  Code#2:
+  {{code_block_opening_tag}}
+  # Finding popular tourist attractions in Shanghai
+  shanghai_attractions = web_search(query="popular tourist attractions in Shanghai")
+  print("Shanghai attractions:", shanghai_attractions)
+  {{code_block_closing_tag}}
+  Early Stop Strategy: none
+
+  Above examples were using notional tools that might not exist for you. On top of performing computations in the Python code snippets that you create, you only have access to these tools, behaving like regular python functions:
+  ```python
   {%- for tool in tools.values() %}
   {{ tool.to_code_prompt() }}
   {% endfor %}
-  {{code_block_closing_tag}}
+  ```
 
   {%- if managed_agents and managed_agents.values() | list %}
   You can also give tasks to team members.
   Calling a team member works similarly to calling a tool: provide the task description as the 'task' argument. Since this team member is a real human, be as detailed and verbose as necessary in your task description.
   You can also include any relevant variables or context using the 'additional_args' argument.
   Here is a list of the team members that you can call:
-  {{code_block_opening_tag}}
+  ```python
   {%- for agent in managed_agents.values() %}
   def {{ agent.name }}(task: str, additional_args: dict[str, Any]) -> str:
       """{{ agent.description }}
@@ -202,7 +221,7 @@ system_prompt: |-
           additional_args: Dictionary of extra inputs to pass to the managed agent, e.g. images, dataframes, or any other contextual data it may need.
       """
   {% endfor %}
-  {{code_block_closing_tag}}
+  ```
   {%- endif %}
 
   Here are the rules you should always follow to solve your task:
@@ -215,7 +234,7 @@ system_prompt: |-
   7. Don't name any new variable with the same name as a tool: for instance don't name a variable 'final_answer'.
   8. Never create any notional variables in our code, as having these in your logs will derail you from the true variables.
   9. You can use imports in your code, but only from the following list of modules: {{authorized_imports}}
-  10. The state persists between code executions(except Check Code): so if in one step you've created variables or imported modules, these will all persist.
+  10. The state persists between code executions(except Early Stop Code): so if in one step you've created variables or imported modules, these will all persist.
   11. Don't give up! You're in charge of solving the task, not providing directions to solve it.
 
   {%- if custom_instructions %}
@@ -223,7 +242,7 @@ system_prompt: |-
   {%- endif %}
 
   Now Begin!
-check:
+earlystop:
   system_prompt: |-
     You are a helpful assistant that helps to decide if a task is completed based on the provided information and criteria. You must answer with either True or False.
     Here are a few examples:
@@ -239,7 +258,7 @@ check:
     ---
     user: The output is:\n5070\nBased on the task description and the criteria:\nTask: What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100? Criteria: The answer is between 5000 and 5100.\n, does the task complete? Answer True or False without any explanation.
     assistant: True
-  prompt: |-
+  earlystop_prompt: |-
     The output is:\n{{output}}\nBased on the task description and the criteria:\n{{details}}\n, does the task complete? Answer True or False first without any explanation."
 planning:
   initial_plan : |-

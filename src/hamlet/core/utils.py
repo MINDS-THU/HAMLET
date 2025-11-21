@@ -42,6 +42,7 @@ __all__ = ["AgentError"]
 def _is_package_available(package_name: str) -> bool:
     return importlib.util.find_spec(package_name) is not None
 
+BASIC_DATA_TYPES = {int, str, float, bool, list, dict, tuple, set, complex}
 
 BASE_BUILTIN_MODULES = [
     "collections",
@@ -204,20 +205,20 @@ def parse_code_blobs(text: str, code_block_tags: tuple[str, str]) -> str:
     except SyntaxError:
         pass
 
-    if "final" in text and "answer" in text:
-        raise ValueError(
-            dedent(
-                f"""
-                Your code snippet is invalid, because the regex pattern {code_block_tags[0]}(.*?){code_block_tags[1]} was not found in it.
-                Here is your code snippet:
-                {text}
-                It seems like you're trying to return the final answer, you can do it as follows:
-                {code_block_tags[0]}
-                final_answer("YOUR FINAL ANSWER HERE")
-                {code_block_tags[1]}
-                """
-            ).strip()
-        )
+    # if "final" in text and "answer" in text:
+    #     raise ValueError(
+    #         dedent(
+    #             f"""
+    #             Your code snippet is invalid, because the regex pattern {code_block_tags[0]}(.*?){code_block_tags[1]} was not found in it.
+    #             Here is your code snippet:
+    #             {text}
+    #             It seems like you're trying to return the final answer, you can do it as follows:
+    #             {code_block_tags[0]}
+    #             final_answer("YOUR FINAL ANSWER HERE")
+    #             {code_block_tags[1]}
+    #             """
+    #         ).strip()
+    #     )
     raise ValueError(
         dedent(
             f"""
