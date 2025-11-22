@@ -1,29 +1,34 @@
 import json
-from src.hamlet.core.agents import CodeAgent
-from src.hamlet.core.monitoring import LogLevel
+from pydantic import BaseModel, Field
 import yaml
 import importlib.resources
 import os
 from typing import Optional, List
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+from src.hamlet.core.agents import CodeAgent
+from src.hamlet.core.monitoring import LogLevel
+from src.hamlet.core.utils import get_fields_info
+from src.hamlet.core.models import LiteLLMModel
 
 # Tools: web search, get paper, and file editing
-from ..tools.open_deep_search.ods_tool import OpenDeepSearchTool
-from ..tools.get_paper_from_url.get_paper_from_url_tool import GetPaperFromURL
-from ..tools.file_editing.file_editing_tools import (
+from src.hamlet.tools.open_deep_search.ods_tool import OpenDeepSearchTool
+from src.hamlet.tools.get_paper_from_url.get_paper_from_url_tool import GetPaperFromURL
+from src.hamlet.tools.file_editing.file_editing_tools import (
     ListDir,
     SeeTextFile,
     DeleteFileOrFolder,
     SearchKeyword,
 )
-from src.hamlet.core.models import LiteLLMModel
-from dotenv import load_dotenv
-load_dotenv(override=True)
+
 
 def create_paper_search_agent(
     working_directory: str,
     model: LiteLLMModel,
     max_steps: int = 5,
     verbosity_level: LogLevel = LogLevel.INFO,
+    output_schema: Optional[BaseModel] = None,
 ) -> CodeAgent:
     """
     Create an agent that can:
@@ -72,6 +77,7 @@ def create_paper_search_agent(
         tools=tools,
         model=model,
         prompt_templates=prompt_templates,
+        output_schema=output_schema,
         max_steps=max_steps,
         # planning_interval=max_steps+1,
         verbosity_level=verbosity_level,
@@ -92,20 +98,37 @@ if __name__ == "__main__":
         shutil.rmtree(wd)
     os.makedirs(wd, exist_ok=True)
     model = LiteLLMModel(model_id="gpt-5-mini", api_base=os.getenv("OPENAI_API_BASE"), api_key=os.getenv("OPENAI_API_KEY"))
+
+    class SingleOutput(BaseModel):
+        title: str = Field(..., description="The title of the paper")
+        year: Optional[int] = Field(None, description="The publication year of the paper")
+        authors: Optional[str] = Field(None, description="The authors of the paper")
+        short_summary: str = Field(..., description="A summary of the paper")
+        url: str = Field(..., description="The URL of the paper")
+        save_path: str = Field(..., description="The file path where the paper is saved")
+
+    class Output(BaseModel):
+        summary: str = Field(..., description="A summary of the search results and papers found")
+        papers: List[SingleOutput] = Field(..., description="A list of papers found and summarized by the agent")
+        
+    # print("Fields info for SingleOutput:\n", '\n'.join(get_fields_info(Output)))
+
     agent = create_paper_search_agent(
         working_directory=wd,
         model=model,
-        max_steps=20,
+        max_steps=3,
         verbosity_level=LogLevel.DEBUG,
+        output_schema=Output,
         )
-    # agent.run("I am interested in papers that uses LLM to automate or assist the construction of simulation, especially discrete-event simulation.")
-    full_results = agent.run("I am interested in recent papers on large language models for robotics. Use Early Stop Strategy 'code'.", return_full_result=True)
+    output = agent.run("I am interested in recent papers on large language models for robotics.")
+    print(type(output))
+    # full_results = agent.run("I am interested in recent papers on large language models for robotics.", return_full_result=True)
 
     # with open("src/hamlet/literature_survey_app/paper_search_agent_result_code.json", "w") as f:
     #     json.dump(full_results.steps, f, indent=2)
 
     """
-    ssh -vvv -N -R 7890:localhost:7890 -p 2227 lijinbo@166.111.59.11
+    ssh -vvv -N -R 7890:localhost:7890 -p 2228 lijinbo@166.111.59.11
     export http_proxy=http://127.0.0.1:7890
     export https_proxy=http://127.0.0.1:7890
 

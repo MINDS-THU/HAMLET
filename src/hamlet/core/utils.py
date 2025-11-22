@@ -27,7 +27,9 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple, Union, get_args, get_origin
+from types import UnionType
+from pydantic import BaseModel
 import jinja2
 
 
@@ -57,6 +59,98 @@ BASE_BUILTIN_MODULES = [
     "time",
     "unicodedata",
 ]
+
+
+def get_fields_info(model: BaseModel, indent=0):
+    lines = []
+    for name, field in model.model_fields.items():
+        field_desc = field.description or name
+        prefix = "  " * indent + f"- {name}:"
+        annotation = field.annotation
+        
+        type_name = get_type_name(annotation)
+        lines.append(f"{prefix} {type_name} ({field_desc})")
+        
+        if should_expand(annotation):
+            append_type_details(annotation, indent + 1, lines)
+    return lines
+
+def get_type_name(tp):
+    from typing import get_origin, get_args, Union, Any
+    from types import UnionType
+    
+    origin = get_origin(tp)
+    if origin is list:
+        args = get_args(tp)
+        item_type = args[0] if args else Any
+        return f"List[{get_type_name(item_type)}]"
+    if origin is dict:
+        args = get_args(tp)
+        key_type = args[0] if args else Any
+        val_type = args[1] if len(args) > 1 else Any
+        return f"Dict[{get_type_name(key_type)}, {get_type_name(val_type)}]"
+    if origin in (Union, UnionType):
+        args = get_args(tp)
+        if len(args) == 2 and type(None) in args:
+            non_none = next(a for a in args if a is not type(None))
+            return f"Optional[{get_type_name(non_none)}]"
+        return f"Union[{', '.join(get_type_name(a) for a in args)}]"
+    
+    if hasattr(tp, "model_fields"):
+        return "Dict"
+    if hasattr(tp, "__name__"):
+        return tp.__name__
+    return str(tp)
+
+def should_expand(tp):
+    if hasattr(tp, "model_fields"):
+        return True
+        
+    origin = get_origin(tp)
+    if origin is list:
+        args = get_args(tp)
+        return should_expand(args[0]) if args else False
+    if origin is dict:
+        args = get_args(tp)
+        return (should_expand(args[0]) if args else False) or \
+               (should_expand(args[1]) if len(args) > 1 else False)
+    if origin in (Union, UnionType):
+        return any(should_expand(a) for a in get_args(tp))
+    return False
+
+def append_type_details(tp, indent, lines):
+    if hasattr(tp, "model_fields"):
+        lines.extend(get_fields_info(tp, indent))
+        return
+
+    origin = get_origin(tp)
+    if origin is list:
+        args = get_args(tp)
+        if args and should_expand(args[0]):
+            append_type_details(args[0], indent, lines)
+            
+    elif origin is dict:
+        args = get_args(tp)
+        key_type = args[0] if args else Any
+        val_type = args[1] if len(args) > 1 else Any
+        if should_expand(key_type):
+            lines.append("  " * indent + "Key structure:")
+            append_type_details(key_type, indent + 1, lines)
+        if should_expand(val_type):
+            lines.append("  " * indent + "Value structure:")
+            append_type_details(val_type, indent + 1, lines)
+            
+    elif origin in (Union, UnionType):
+        args = get_args(tp)
+        if len(args) == 2 and type(None) in args:
+             non_none = next(a for a in args if a is not type(None))
+             if should_expand(non_none):
+                 append_type_details(non_none, indent, lines)
+        else:
+            for i, arg in enumerate(args):
+                if should_expand(arg):
+                    lines.append("  " * indent + f"Option {i+1} ({get_type_name(arg)}) structure:")
+                    append_type_details(arg, indent + 1, lines)
 
 
 def escape_code_brackets(text: str) -> str:
@@ -263,6 +357,31 @@ def parse_several_code_blobs(text: str, code_block_tags: tuple[str, str]) -> Tup
     early_stop_prompt_match = re.search(early_stop_prompt_pattern, text, re.DOTALL)
 
     if code_matches and early_stop_code_match and early_stop_strategy_match and early_stop_strategy_match.group(1) == 'code':
+        if early_stop_code_match.group(1) != code_matches[-1]:
+            raise ValueError(
+                dedent(
+                    f"""
+                    Your last code block is not the early stop code. Please ensure that the last code block corresponds to the early stop code.
+                    Here is your output:
+                    {text}
+                    Make sure to include the early stop code as the last code block, for instance:
+                    Thoughts: Your thoughts
+                    Code#1:
+                    {code_block_tags[0]}
+                    # Your first python code here
+                    {code_block_tags[1]}
+                    Code#2:
+                    {code_block_tags[0]}
+                    # Your second python code here
+                    {code_block_tags[1]}
+                    Early Stop Strategy: code
+                    Early Stop Code:
+                    {code_block_tags[0]}
+                    # Your code for early stopping here
+                    {code_block_tags[1]}
+                    """
+                ).strip()
+            )
         code_matches = code_matches[:-1]  # Remove the last code block which is for early stopping
 
     if not code_matches:

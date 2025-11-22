@@ -399,3 +399,7 @@ final_answer:
   post_messages: |-
     Based on the above, please provide an answer to the following user task:
     {{task}}
+
+    {%- if output_schema %}
+    {{instructions}}
+    {%- endif %}
