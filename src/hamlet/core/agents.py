@@ -26,7 +26,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Literal, Tuple, Type, TypeAlias, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, Literal, Tuple, Type, TypeAlias, TypedDict, Union, get_origin, get_args
 from textwrap import dedent
 from pydantic import BaseModel
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
@@ -89,6 +89,7 @@ from .utils import (
     parse_code_blobs,
     parse_several_code_blobs,
     truncate_content,
+    get_fields_info,
 )
 
 
@@ -100,20 +101,7 @@ def populate_template(template: str, variables: dict[str, Any]) -> str:
     try:
         return compiled_template.render(**variables)
     except Exception as e:
-        raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
-
-def get_fields_info(model: BaseModel, indent=0):
-    lines = []
-    for name, field in model.model_fields.items():
-        field_desc = field.description or name
-        prefix = "  " * indent + f"- {name}:"
-        if hasattr(field.annotation, "model_fields"):
-            lines.append(f"{prefix} ")
-            lines.extend(get_fields_info(field.annotation, indent + 1))
-        else:
-            type_name = field.annotation.__name__ if hasattr(field.annotation, "__name__") else str(field.annotation)
-            lines.append(f"{prefix} {type_name} ({field_desc})")
-    return lines
+        raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}") from None
 
 
 @dataclass
@@ -359,6 +347,9 @@ class MultiStepAgent(ABC):
             raise TypeError(f"Output_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {output_schema}")
         self.input_schema = input_schema
         self.output_schema = output_schema
+        
+        if self.output_schema:
+            self.instructions = f'\n{self.get_output_instructions()}' if self.instructions is None else self.instructions + f'\n{self.get_output_instructions()}'
 
         self._setup_managed_agents(managed_agents)
         self._setup_tools(tools)
@@ -604,7 +595,7 @@ class MultiStepAgent(ABC):
                     if isinstance(output, ActionOutput) and output.is_final_answer:
                         final_answer = output.output
                         self.logger.log(
-                            Text(f"Final answer: {final_answer}", style=f"bold {YELLOW_HEX}"),
+                            Text(f"Final answer:\n{str(final_answer)}", style=f"bold {YELLOW_HEX}"),
                             level=LogLevel.INFO,
                         )
 
@@ -629,29 +620,39 @@ class MultiStepAgent(ABC):
             final_answer, final_memory_step = self._handle_max_steps_reached(task)
             if self.output_schema is not None:
                 if issubclass(self.output_schema, BaseModel):
-                    schema_str = get_fields_info(self.output_schema)
                     if isinstance(final_answer, dict):
                         try:
                             final_answer = self.output_schema.model_validate(final_answer)
                         except Exception as e:
-                            raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
+                            raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output: {e}", self.logger) from None
                     else:
-                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
+                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output. Output should be of type dict, got {type(final_answer)}", self.logger)
                 else:
                     if not isinstance(final_answer, self.output_schema):
-                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output.")
-            self.logger.log_markdown(
-                content=str(final_answer) or "",
-                title="Final answer given by LLM when max steps reached:",
-                level=LogLevel.DEBUG,
-            )
+                        raise AgentParsingError(f"Reached max steps. The agent generated a final answer but validation failed for the final output. Output should be of type {self.output_schema}, got {type(final_answer)}", self.logger)
+            try:
+                if isinstance(final_answer, BaseModel):
+                    self.logger.log_markdown(
+                        content=final_answer.model_dump_json(),
+                        title="Final answer given by LLM when max steps reached:",
+                        level=LogLevel.DEBUG,
+                        style="green"
+                    )
+                else:
+                    self.logger.log_markdown(
+                        content=str(final_answer),
+                        title="Final answer given by LLM when max steps reached:",
+                        level=LogLevel.DEBUG,
+                        style="green"
+                    )
+            except Exception:
+                pass
             yield final_memory_step
-        
+
         if self.output_schema is not None:
             yield FinalAnswerStep(final_answer)
         else:
             yield FinalAnswerStep(handle_agent_output_types(final_answer))
-
 
     def _validate_final_answer(self, final_answer: Any):
         validate_passed, details = self.validate_output(final_answer)
@@ -661,7 +662,7 @@ class MultiStepAgent(ABC):
             try:
                 assert check_function(final_answer, self.memory)
             except Exception as e:
-                raise AgentError(f"Check {check_function.__name__} failed with error: {e}", self.logger)
+                raise AgentError(f"Check {check_function.__name__} failed with error: {e}", self.logger) from None
         return details
 
     def _finalize_step(self, memory_step: ActionStep | PlanningStep):
@@ -672,15 +673,23 @@ class MultiStepAgent(ABC):
         action_step_start_time = time.time()
         try:
             final_answer = self.provide_final_answer(task)
+            self.logger.log_markdown(
+                content=final_answer.content,
+                title="Reached max steps. The final answer generated by the model is:",
+                level=LogLevel.DEBUG,
+            )
         except Exception as e:
-            raise AgentGenerationError(f"Reached max steps. And an error occurred when generating final answer: {e}", self.logger)
+            raise AgentGenerationError(f"Reached max steps. And an error occurred when generating final answer: {e}", self.logger) from None
         try:
-            final_code_action = parse_several_code_blobs(final_answer.content, self.code_block_tags)
-        except Exception:
-            raise AgentParsingError("Reached max steps. And an error occurred when parsing code blocks from final answer.", self.logger)
+            final_code_action = parse_code_blobs(final_answer.content, self.code_block_tags)
+        except Exception as e:
+            raise AgentParsingError(f"Reached max steps. And an error occurred when parsing code blocks from final answer: {e}", self.logger) from None
         if "final_answer(" not in final_code_action:
             raise AgentParsingError("Reached max steps. And call of FinalAnswerTool is not found in the model output.", self.logger)
-        final_output = self.python_executor(final_code_action)
+        try:
+            final_output = self.python_executor(final_code_action).output
+        except Exception as e:
+            raise AgentExecutionError(f"Reached max steps. And an error occurred when executing final answer code: {e}", self.logger) from None
         final_memory_step = ActionStep(
             step_number=self.step_number,
             error=AgentMaxStepsError("Reached max steps.", self.logger),
@@ -817,9 +826,15 @@ class MultiStepAgent(ABC):
                 structured_output_instructions = dedent(
                     f"""
                     Strictly follow the structured output instructions below:
-                    Your final answer must be outputted in the dict format. Please only output valid dict objects, do not include any additional text.
+                    Your final answer must be outputted in the dict format. Please only output valid dict objects, adhere to Python syntax, use None instead of null, use True/False instead of true/false, and do not include any additional text.
                     Ensuring all necessary keys are included and have the values of the correct type:
                     {fields_info_str}
+                    REMEMBER to use final_answer(...) to return your final answer to the task. It should be opened with {self.code_block_tags[0]} and closed with {self.code_block_tags[1]}. i.e.,
+                    {self.code_block_tags[0]}
+                    final_answer(
+                    your_final_answer_here
+                    )
+                    {self.code_block_tags[1]}
                     """
                 )
             else:
@@ -828,7 +843,11 @@ class MultiStepAgent(ABC):
                     f"""
                     Strictly follow the structured output instructions below:
                     Your final answer must be outputted as an object of type {type_name}. 
-                    Please output only a valid {type_name} object, do not include any additional text or explanation.
+                    Please output only a valid {type_name} object, adhere to Python syntax, use None instead of null, use True/False instead of true/false, and do not include any additional text or explanation.
+                    REMEMBER to use final_answer(...) to return your final answer to the task. It should be opened with {self.code_block_tags[0]} and closed with {self.code_block_tags[1]}. i.e.,
+                    {self.code_block_tags[0]}
+                    final_answer(your_final_answer_here)
+                    {self.code_block_tags[1]}
                     """
                 )
             return structured_output_instructions
@@ -960,20 +979,22 @@ class MultiStepAgent(ABC):
         ]
         messages += self.write_memory_to_messages()[1:]
 
-        post_prompt = populate_template(
-            self.prompt_templates["final_answer"]["post_messages"],
-            variables={"task": task},
-        )
-        if self.output_schema:
-            post_prompt += "\n\n" + self.get_output_instructions()
-
         messages.append(
             ChatMessage(
                 role=MessageRole.USER,
                 content=[
                     {
                         "type": "text",
-                        "text": post_prompt,
+                        "text": populate_template(
+                            self.prompt_templates["final_answer"]["post_messages"],
+                            variables={
+                                "task": task,
+                                "output_schema": self.output_schema,
+                                "instructions": self.get_output_instructions(),
+                                "code_block_opening_tag": self.code_block_tags[0],
+                                "code_block_closing_tag": self.code_block_tags[1],
+                            },
+                        ),
                     }
                 ],
             )
@@ -1453,10 +1474,6 @@ class CodeAgent(MultiStepAgent):
                 "code_block_closing_tag": self.code_block_tags[1],
             },
         )
-
-        # if output_schema is provided, add structured output instructions to system prompt
-        if self.output_schema:
-            system_prompt += f'\n\n{self.get_output_instructions()}'
         # print(system_prompt)
         return system_prompt
 
@@ -1505,7 +1522,7 @@ class CodeAgent(MultiStepAgent):
             memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = output_text
         except Exception as e:
-            raise AgentGenerationError(f"Error in generating model output:\n{e}", self.logger) from e
+            raise AgentGenerationError(f"Error in generating model output:\n{e}", self.logger) from None
 
         ### Parse output ###
         try:
@@ -1631,9 +1648,8 @@ class CodeAgent(MultiStepAgent):
                                 if isinstance(current_step_finished, str):
                                     current_step_finished = "True" in current_step_finished.strip() or "true" in current_step_finished.strip()
                             except Exception as e:
-                                self.logger.log(f"[bold red]Error occurred while executing early stop code (when evaluating the execution result of Code#{idx+1}): {e}", level=LogLevel.ERROR)
                                 error_msg = f"An error occurred while executing early stop code (when evaluating the execution result of Code#{idx+1}): {e}"
-                                raise AgentExecutionError(error_msg, self.logger) from e
+                                raise AgentExecutionError(error_msg, self.logger) from None
                         else:
                             execution_outputs_console += [
                                     Text(f"Using early stop prompt for Code#{idx+1} ({len(code_actions)} in total)...", style="bold")
@@ -1668,7 +1684,7 @@ class CodeAgent(MultiStepAgent):
                                 ]
                                 current_step_finished = "True" in str(response.content).strip() or "true" in str(response.content).strip()
                             except Exception as e:
-                                raise AgentGenerationError(f"Error in generating evaluation result with early stop prompt:\n{e}", self.logger) from e
+                                raise AgentGenerationError(f"Error in generating evaluation result with early stop prompt:\n{e}", self.logger) from None
                             
                         if current_step_finished:
                             execution_outputs_console += [

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 from src.hamlet.core.models import LiteLLMModel
@@ -28,6 +28,10 @@ class Answer(BaseModel):
     description: str = Field(..., description="The description of the method")
     result: int = Field(..., description="The final result of the computation")
 
+class Question(BaseModel):
+    structured_input: int
+    structured_output: str
+
 agent = CodeAgent(
     model=model, 
     tools=[
@@ -36,13 +40,15 @@ agent = CodeAgent(
         ModifyFile(working_dir=working_dir),
         CreateFileWithContent(working_dir=working_dir)
         ],
+        # input_schema=Question,
         output_schema=Answer,
     verbosity_level=LogLevel.DEBUG)
-
+question = Question(structured_input=100, structured_output="40")
 # full_res = agent.run("What is the capital of France? Write the answer to a file named capital.txt Then read the file to check if everything looks good. Then modify the file to add some descriptions of the capital city.", return_full_result=True)
 # full_res = agent.run("What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100? Use more than one method to compute concurrently. Use the Check Method 'prompt'. And use the 'final_answer' tool in a new step if your answer pass the check.", return_full_result=True)
 # full_res = agent.run("What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100? Use the 'final_answer' tool in the second step.", return_full_result=True)
-output = agent.run("What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100?")
+# output = agent.run("What is the result of the following operation: 1 + 2 + 3 + ... + structured_input?", structured_input=question)
+output = agent.run("What is the result of the following operation: 1 + 2 + 3 + ... + 99 + 100? Use more than one method to compute concurrently. Use the Early Stop Strategy 'code'. It is known that the result is between 5000 and 5100")
 print("Final output:", output)
 print("Type of final output:", type(output))
 
