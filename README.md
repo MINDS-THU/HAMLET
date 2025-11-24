@@ -35,7 +35,6 @@ Optional extras:
 ## Getting Started
 
 Jump into the `examples/` directory to see how to use HAMLET in action:
-- `examples/demo_llm_agent.py`: minimal walkthrough of a HAMLET code agent.
 - `examples/gradio_gui_example.py`: launches a Gradio UI for interactive tool usage.
 - `examples/parallel_code_blocks_example.py`: shows multi-tool calls dispatched in parallel.
 - `examples/structured_schema_example.py`: demonstrates structured input/output schemas.
