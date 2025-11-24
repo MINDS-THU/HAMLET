@@ -9,7 +9,7 @@ from src.hamlet.core.tools import Tool
 
 
 class SQLiteQueryTool(Tool):
-	name = "database_query"
+	name = "query_database"
 	description = (
 		"Execute a SELECT query against a SQLite database located in the working directory and "
 		"return the rows as a JSON-encoded list of dictionaries or tuples. Rejects non-SELECT "
@@ -58,6 +58,8 @@ class SQLiteQueryTool(Tool):
 			resolved_path = self._resolve_database_path(database_path)
 		except PermissionError as exc:
 			return str(exc)
+		if not os.path.exists(resolved_path):
+			raise FileNotFoundError(f"Database file not found: {database_path}")
 
 		try:
 			connection = self._get_connection(resolved_path)
@@ -96,15 +98,11 @@ class SQLiteQueryTool(Tool):
 				cursor.close()
 
 	def _resolve_database_path(self, database_path: str) -> str:
-		candidate = (
-			database_path
-			if os.path.isabs(database_path)
-			else os.path.join(self._working_dir, database_path)
-		)
-		resolved = os.path.abspath(candidate)
-		if os.path.commonpath([self._working_dir, resolved]) != self._working_dir:
+		abs_working_dir = os.path.abspath(self._working_dir)
+		abs_path = os.path.abspath(os.path.join(self._working_dir, database_path))
+		if not abs_path.startswith(abs_working_dir):
 			raise PermissionError("Access outside the working directory is not allowed.")
-		return resolved
+		return abs_path
 
 	def _get_connection(self, resolved_path: str) -> sqlite3.Connection:
 		if self._connection is not None and self._active_db_path == resolved_path:

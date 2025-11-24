@@ -271,7 +271,7 @@ class MultiStepAgent(ABC):
         tools (`list[Tool]`): [`Tool`]s that the agent can use.
         model (`Callable[[list[dict[str, str]]], ChatMessage]`): Model that will generate the agent's actions.
         prompt_templates ([`~agents.PromptTemplates`], *optional*): Prompt templates.
-        instructions (`str`, *optional*): Custom instructions for the agent, will be inserted in the system prompt.
+        instructions (`Dict[str, str]`, *optional*): Custom instructions for the agent, will be inserted in the system prompt.
         input_schema (`Any`, *optional*): Schema for validating structured input.
             If provided, agent will only accept structured input matching this schema.
         output_schema (`Any`, *optional*): Schema for validating structured output.
@@ -296,7 +296,7 @@ class MultiStepAgent(ABC):
         tools: list[Tool],
         model: Model,
         prompt_templates: PromptTemplates | None = None,
-        instructions: str | None = None,
+        instructions: dict[str, str] | None = None,
         input_schema: Any = None,
         output_schema: Any = None,
         max_steps: int = 20,
@@ -347,9 +347,6 @@ class MultiStepAgent(ABC):
             raise TypeError(f"Output_schema must be a Pydantic BaseModel subclass or one of the allowed built-in basic data types {BASIC_DATA_TYPES}, not {output_schema}")
         self.input_schema = input_schema
         self.output_schema = output_schema
-        
-        if self.output_schema:
-            self.instructions = f'\n{self.get_output_instructions()}' if self.instructions is None else self.instructions + f'\n{self.get_output_instructions()}'
 
         self._setup_managed_agents(managed_agents)
         self._setup_tools(tools)
@@ -365,6 +362,19 @@ class MultiStepAgent(ABC):
 
         self.monitor = Monitor(self.model, self.logger)
         self._setup_step_callbacks(step_callbacks)
+
+        if self.output_schema:
+            if self.instructions is None:
+                self.instructions = {}
+            if "output_schema_instruction" not in self.instructions:
+                self.instructions["output_schema_instruction"] = self.get_output_instructions()
+            self.logger.log(
+                Text(
+                    f"Output schema instruction added:\n{self.instructions['output_schema_instruction']}",
+                    style=f"bold {YELLOW_HEX}",
+                ),
+                level=LogLevel.INFO,
+            )
 
     @property
     def system_prompt(self) -> str:
@@ -989,8 +999,7 @@ class MultiStepAgent(ABC):
                             self.prompt_templates["final_answer"]["post_messages"],
                             variables={
                                 "task": task,
-                                "output_schema": self.output_schema,
-                                "instructions": self.get_output_instructions(),
+                                "custom_instructions": self.instructions,
                                 "code_block_opening_tag": self.code_block_tags[0],
                                 "code_block_closing_tag": self.code_block_tags[1],
                             },
@@ -1474,7 +1483,7 @@ class CodeAgent(MultiStepAgent):
                 "code_block_closing_tag": self.code_block_tags[1],
             },
         )
-        # print(system_prompt)
+        print(system_prompt)
         return system_prompt
 
     def _step_stream(
