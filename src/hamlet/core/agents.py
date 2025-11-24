@@ -1483,7 +1483,7 @@ class CodeAgent(MultiStepAgent):
                 "code_block_closing_tag": self.code_block_tags[1],
             },
         )
-        print(system_prompt)
+        # print(system_prompt)
         return system_prompt
 
     def _step_stream(
