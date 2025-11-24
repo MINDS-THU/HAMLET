@@ -4,7 +4,7 @@ This module contains tools for managing files and folders in a knowledge base st
 Supports listing, viewing, moving, renaming, and deleting files within the knowledge base.
 """
 
-from src.hamlet.core.tools import Tool
+from hamlet.core.tools import Tool
 import os
 import shutil
 from pathlib import Path

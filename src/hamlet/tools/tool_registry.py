@@ -8,7 +8,7 @@ import importlib
 import inspect
 from pathlib import Path
 from typing import Dict, Type, List, Optional
-from src.hamlet.core.tools import Tool
+from hamlet.core.tools import Tool
 
 
 class ToolRegistry:

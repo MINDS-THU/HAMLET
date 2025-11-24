@@ -8,29 +8,29 @@ import json
 
 from openai import AsyncOpenAI
 
-from src.hamlet.core.agents import CodeAgent
-from src.hamlet.core.models import (
+from hamlet.core.agents import CodeAgent
+from hamlet.core.models import (
     MessageRole,
     Model,
     OpenAIServerModel,
 )
-from src.hamlet.core.utils import (
+from hamlet.core.utils import (
     parse_code_blobs, 
     extract_code_from_text,
 )
-from src.hamlet.core.local_python_executor import fix_final_answer_code
+from hamlet.core.local_python_executor import fix_final_answer_code
 
-from src.hamlet.train.environment import Environment
-from src.hamlet.train.utils.async_utils import maybe_await
-from src.hamlet.train.utils.types import (
+from hamlet.train.environment import Environment
+from hamlet.train.utils.async_utils import maybe_await
+from hamlet.train.utils.types import (
     Info,
     Messages,
     SamplingArgs,
     State,
 )
-from src.hamlet.train.rubric import Rubric
+from hamlet.train.rubric import Rubric
 
-logger = logging.getLogger("src.hamlet.train.codeagent_environment")
+logger = logging.getLogger("hamlet.train.codeagent_environment")
 
 class MultiTurnEnv(Environment):
     def __init__(self, max_turns: int = -1, **kwargs):
@@ -421,40 +421,6 @@ class CodeAgentEnv(MultiTurnEnv):
 
         state["completion"] = completion
         return completion, state
-        # Convert memory steps into chat messages, excluding the initial TaskStep that mirrors the user input.
-        # new_messages: list[ChatCompletionMessageParam] = []
-        # for memory_step in self._agent.memory.steps:
-        #     if isinstance(memory_step, TaskStep):
-        #         continue
-        #     step_messages = memory_step.to_messages(summary_mode=False)
-        #     if not step_messages:
-        #         continue
-        #     converted = self._convert_messages(step_messages)
-        #     new_messages.extend(converted)
-
-        # if full_result.output is not None:
-        #     final_message: ChatCompletionMessageParam = {
-        #         "role": "assistant",
-        #         "content": str(full_result.output),
-        #     }
-        #     if not new_messages or cast(dict[str, Any], new_messages[-1]).get("content") != final_message["content"]:
-        #         new_messages.append(final_message)
-
-        # Update rollout and completion buffers
-        # rollout_messages.extend(new_messages)
-        # completion_messages = new_messages
-
-        # assistant_messages = [msg for msg in new_messages if msg.get("role") == "assistant"]
-        # state["responses"].extend(assistant_messages)
-        # state["completion"] = completion_messages
-        # state["full_steps"] = full_result.steps
-        # if full_result.token_usage is not None:
-        #     state["token_usage"] = {
-        #         "input_tokens": full_result.token_usage.input_tokens,
-        #         "output_tokens": full_result.token_usage.output_tokens,
-        #     }
-
-        # return completion_messages, state
 
     def _ensure_agent(self, client: AsyncOpenAI, model_id: str) -> None:
         """Initialise or refresh the underlying CodeAgent and model."""
@@ -499,28 +465,6 @@ class CodeAgentEnv(MultiTurnEnv):
         if user_messages:
             return user_messages[-1]
         return default or ""
-
-    # @staticmethod
-    # def _convert_messages(messages: Iterable[ChatMessage]) -> list[ChatCompletionMessageParam]:
-    #     # print("========= messages ===============")
-    #     # print(messages)
-    #     # print("========= end messages ===============")
-    #     cleaned = get_clean_message_list(
-    #         list(messages),
-    #         role_conversions=tool_role_conversions,
-    #         flatten_messages_as_text=True,
-    #     )
-    #     # print("========= cleaned ===============")
-    #     # print(cleaned)
-    #     # print("========= end cleaned ===============")
-    #     formatted: list[ChatCompletionMessageParam] = []
-    #     for message in cleaned:
-    #         role = message.get("role", "assistant")
-    #         content = message.get("content")
-    #         if content is None or not isinstance(content, str):
-    #             continue
-    #         formatted.append({"role": role, "content": content})
-    #     return formatted
 
     @staticmethod
     def _extract_client_connection(client: AsyncOpenAI) -> dict[str, str | None]:

@@ -3,7 +3,7 @@ This module contains tools for semantic and keyword search in a knowledge base s
 The knowledge base is organized into folders and files, allowing for efficient retrieval of information.
 """
 
-from src.hamlet.core.tools import Tool
+from hamlet.core.tools import Tool
 from .repo_indexer import RepoIndexer
 import os
 import shutil

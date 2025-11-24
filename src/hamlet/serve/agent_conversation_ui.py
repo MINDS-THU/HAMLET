@@ -3,6 +3,7 @@
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
+
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
@@ -13,16 +14,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import os
 import re
 import shutil
+import tempfile
+import zipfile
 from typing import Optional
 
-from src.hamlet.core.agent_types import AgentAudio, AgentImage, AgentText
-from src.hamlet.core.agents import MultiStepAgent, PlanningStep
-from src.hamlet.core.memory import ActionStep, FinalAnswerStep, MemoryStep
-from src.hamlet.core.utils import _is_package_available
-from src.hamlet.core.models import ChatMessageStreamDelta  # NEW
+from hamlet.core.agent_types import AgentAudio, AgentImage, AgentText
+from hamlet.core.agents import MultiStepAgent, PlanningStep
+from hamlet.core.memory import ActionStep, FinalAnswerStep, MemoryStep
+from hamlet.core.utils import _is_package_available
+from hamlet.core.models import ChatMessageStreamDelta  # NEW
 
 
 def get_step_footnote_content(step_log: MemoryStep, step_name: str) -> str:
@@ -143,7 +147,7 @@ def pull_messages_from_step(step_log: MemoryStep, skip_model_outputs: bool = Fal
             yield gr.ChatMessage(role="assistant", content="-----", metadata={"status": "done"})
 
     elif isinstance(step_log, FinalAnswerStep):
-        final_answer = step_log.final_answer
+        final_answer = getattr(step_log, "output", None)
         if isinstance(final_answer, AgentText):
             yield gr.ChatMessage(
                 role="assistant",
@@ -208,18 +212,125 @@ def stream_to_gradio(
 class GradioUI:
     """A one-line interface to launch your agent in Gradio"""
 
-    def __init__(self, agent: MultiStepAgent, file_upload_folder: str | None = None):
+    def __init__(
+        self,
+        agent: MultiStepAgent,
+        file_upload_folder: str | None = None,
+        readme_md_path: str | None = None,
+    ):
         if not _is_package_available("gradio"):
             raise ModuleNotFoundError(
                 "Please install 'gradio' extra to use the GradioUI: `pip install 'smolagents[gradio]'`"
             )
         self.agent = agent
-        self.file_upload_folder = file_upload_folder
+        self.file_upload_folder: str
         self.name = getattr(agent, "name") or "Agent interface"
         self.description = getattr(agent, "description", None)
-        if self.file_upload_folder is not None:
-            if not os.path.exists(file_upload_folder):
-                os.mkdir(file_upload_folder)
+        self._set_file_upload_folder(file_upload_folder)
+        self._readme_path = readme_md_path
+        self._readme_markdown = self._load_agent_readme(readme_md_path)
+
+    def _set_file_upload_folder(self, folder: Optional[os.PathLike[str] | str]) -> None:
+        """Ensure the upload folder exists, defaulting to a temporary directory."""
+        if folder is None:
+            folder_path = tempfile.mkdtemp(prefix="hamlet_gradio_upload_")
+        else:
+            folder_path = os.fspath(folder)
+            os.makedirs(folder_path, exist_ok=True)
+        self.file_upload_folder = folder_path
+
+    def _load_agent_readme(self, readme_path: Optional[str], asset_base_url: Optional[str] = None) -> Optional[str]:
+        """Read optional markdown file that describes the agent, fixing relative assets if needed."""
+        if not readme_path:
+            return None
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(readme_path)
+        if parsed.scheme in {"http", "https"}:
+            # handle GitHub "blob" URLs by converting to raw content
+            if parsed.netloc in {"github.com", "www.github.com"}:
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) >= 5 and parts[2] == "blob":
+                    owner, repo, _blob, branch, *rest = parts
+                    asset_dir = "/".join(rest[:-1])
+                    if asset_dir:
+                        asset_dir += "/"
+                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{'/'.join(rest)}"
+                    base = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{asset_dir}"
+                    return self._load_agent_readme(raw_url, base)
+
+            if parsed.netloc == "raw.githubusercontent.com":
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) >= 4:
+                    asset_dir = "/".join(parts[:-1]) + "/"
+                    asset_base_url = f"https://raw.githubusercontent.com/{asset_dir}"
+
+            try:
+                import urllib.request
+
+                request = urllib.request.Request(readme_path, headers={"User-Agent": "HAMLET-Agent/1.0"})
+                with urllib.request.urlopen(request) as response:
+                    raw_bytes = response.read()
+                    detected_charset = response.headers.get_content_charset()
+                    try:
+                        content = raw_bytes.decode(detected_charset or "utf-8", errors="strict")
+                    except (LookupError, UnicodeDecodeError):
+                        content = raw_bytes.decode("utf-8", errors="replace")
+                    if asset_base_url:
+                        content = self._rewrite_relative_asset_paths(content, asset_base_url)
+                    return content
+            except Exception as exc:  # broad to keep UI resilient
+                print(f"Warning: could not fetch agent readme '{readme_path}': {exc}")
+                return None
+
+        abs_path = os.path.abspath(readme_path)
+        try:
+            with open(abs_path, "r", encoding="utf-8") as readme_file:
+                content = readme_file.read()
+                if asset_base_url:
+                    content = self._rewrite_relative_asset_paths(content, asset_base_url)
+                return content
+        except OSError as exc:
+            print(f"Warning: could not load agent readme '{abs_path}': {exc}")
+            return None
+
+    def _rewrite_relative_asset_paths(self, markdown_text: str, base_url: str) -> str:
+        """Convert relative image paths to absolute URLs so Gradio can render them."""
+        import re
+        import urllib.parse
+
+        if not base_url.endswith("/"):
+            base_url = base_url + "/"
+
+        def _absolutize(url: str) -> str:
+            url = url.strip()
+            if not url or url.startswith(("http://", "https://", "data:")) or url.startswith("#"):
+                return url
+            return urllib.parse.urljoin(base_url, url)
+
+        def _replace_markdown_image(match: re.Match) -> str:
+            alt = match.group(1)
+            target = match.group(2).strip()
+            title = match.group(3)
+            if target.startswith("<") and target.endswith(">"):
+                target = target[1:-1]
+            abs_url = _absolutize(target)
+            title_part = f' "{title}"' if title is not None else ""
+            return f"![{alt}]({abs_url}{title_part})"
+
+        def _replace_html_image(match: re.Match) -> str:
+            quote = match.group(1)
+            url = match.group(2)
+            rest = match.group(3)
+            abs_url = _absolutize(url)
+            return f"<img src={quote}{abs_url}{quote}{rest}>"
+
+        md_image_pattern = re.compile(r"!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+\"([^\"]*)\")?\s*\)")
+        html_image_pattern = re.compile(r"<img\s+[^>]*src=([\"\'])\s*([^\"\'>]+)\1([^>]*)>")
+
+        markdown_text = md_image_pattern.sub(_replace_markdown_image, markdown_text)
+        markdown_text = html_image_pattern.sub(_replace_html_image, markdown_text)
+        return markdown_text
 
     def interact_with_agent(self, prompt, messages, session_state):
         import gradio as gr
@@ -289,7 +400,7 @@ class GradioUI:
         return (
             text_input
             + (
-                f"\nYou have been provided with these files, which might be helpful or not: {rel_paths}"
+                f"\nFile uploaded: {rel_paths}"
                 if len(rel_paths) > 0
                 else ""
             ),
@@ -297,7 +408,9 @@ class GradioUI:
             gr.Button(interactive=False),
         )
 
-    def launch(self, share: bool = True, **kwargs):
+    def launch(self, share: bool = True, file_upload_folder: Optional[os.PathLike[str] | str] = None, **kwargs):
+        if file_upload_folder is not None:
+            self._set_file_upload_folder(file_upload_folder)
         self.create_app().launch(debug=True, share=share, **kwargs)
 
     def create_app(self):
@@ -305,12 +418,25 @@ class GradioUI:
         /* --------------------------------------------------------------
         1. Global tweaks – remove Gradio’s 80 rem cap
         ----------------------------------------------------------------*/
-        html, body, #root, .gradio-container,
-        [class*="gradio-container"]{
+        html, body{
+            width:100%;
+            min-height:100vh;
+            height:100%;
+            margin:0;
+            padding:0;
+        }
+
+        #hamlet-root{
+            min-height:100vh;
+            display:flex;
+            flex-direction:column;
+        }
+        #hamlet-root > .gr-block{
+            flex:1 1 auto;
+            display:flex;
+            flex-direction:column;
             max-width:100%!important;
             width:100%!important;
-            margin:0!important;
-            padding:0!important;
         }
 
         /* make the central Row stretch full width */
@@ -325,6 +451,18 @@ class GradioUI:
             display:flex; flex-direction:column;
             height:100%; overflow:hidden;
         }
+                #hamlet-main{
+                    display:flex;
+                    flex:1 1 auto;
+                    min-height:0;
+                    align-items:stretch;
+                    flex-wrap:wrap;
+                }
+                #hamlet-main > .gr-column{
+                    height:100%;
+                    display:flex;
+                    flex-direction:column;
+                }
         .vscode-header{background:#f6f6f6;font-weight:600;padding:4px 8px;}
 
         .vscode-pane .gr-file-explorer{flex:0 0 25vh;overflow:auto;}
@@ -335,6 +473,57 @@ class GradioUI:
         .vscode-pane .gr-pdf{
             flex:1 1 auto;min-height:0;overflow:auto;
             width:100%!important;box-sizing:border-box;
+        }
+
+        .chat-pane{
+            display:flex;
+            flex-direction:column;
+            height:100%;
+            gap:.5rem;
+        }
+        .tsinghua-banner-wrapper{
+            flex:1 0 100%;
+            width:100%;
+            box-sizing:border-box;
+            margin-bottom:.75rem;
+        }
+        .tsinghua-banner{
+            background:#602460;
+            border-radius:8px;
+            padding:.75rem;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            width:100%;
+            position:relative;
+        }
+        .tsinghua-banner-logo{
+            position:absolute;
+            left:1.25rem;
+            display:flex;
+            align-items:center;
+        }
+        .tsinghua-banner-logo img{
+            max-height:56px;
+            width:auto;
+            display:block;
+        }
+        .tsinghua-banner-title{
+            font-size:1.4rem;
+            font-weight:600;
+            color:#ffffff;
+            letter-spacing:.08rem;
+            text-align:center;
+            width:100%;
+        }
+        .chat-pane .gr-chatbot{
+            flex:1 1 auto;
+            min-height:0;
+        }
+        .chat-input-row{
+            flex:0 0 auto;
+            align-items:flex-end;
+            gap:.5rem;
         }
 
         @media (min-width:1024px){
@@ -355,6 +544,53 @@ class GradioUI:
         .preview-box .gr-pdf iframe{
             width:100%!important;height:100%!important;
         }
+
+        .preview-header-row{
+            align-items:center;
+            justify-content:space-between;
+            margin-top:.25rem;
+            margin-bottom:.25rem;
+            gap:.5rem;
+        }
+        .preview-header-title{flex:1; margin:0;}
+        .preview-toolbar{display:flex;gap:.35rem;align-items:center;justify-content:flex-end;}
+        .preview-toolbar button{
+            min-width:34px;
+            height:32px;
+            padding:0;
+            font-size:1rem;
+            border-radius:4px;
+        }
+        .preview-toolbar button:disabled{opacity:0.45;cursor:not-allowed;}
+        .preview-toolbar button.copied{background:#dff5ec;border-color:#8fd3b7;}
+
+        .files-header-row{
+            align-items:center;
+            justify-content:space-between;
+            margin-bottom:1.00rem;
+            gap:.5rem;
+        }
+        .files-header-title{flex:1; margin:0;}
+        .files-toolbar{display:flex;gap:.35rem;align-items:center;justify-content:flex-end;}
+        .files-toolbar button,
+        .files-toolbar label{
+            min-width:34px;
+            height:32px;
+            padding:0 .6rem;
+            font-size:.9rem;
+            border-radius:4px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+        }
+        .files-toolbar button:disabled,
+        .files-toolbar label[aria-disabled="true"]{
+            opacity:0.45;
+            cursor:not-allowed;
+        }
+
+        .preview-wrapper{position:relative;}
 
         .vscode-pane{
             gap:0 !important;
@@ -425,6 +661,7 @@ class GradioUI:
         .overlay‑content .swiper-button-next{
             position:relative!important;
         }
+        }
 
         /* --------------------------------------------------------------
         Header look‑&‑feel  (add just after the existing .vscode-header
@@ -455,6 +692,58 @@ class GradioUI:
         .vscode-pane > .overlay-wrapper{
             margin-top:0 !important;           /* kill the gap         */
             height:0 !important;               /* removes extra space  */
+        }
+
+        /* --------------------------------------------------------------
+        6. Brand credit badge
+        ----------------------------------------------------------------*/
+        .minds-credit{
+            margin-top:.6rem;
+            display:flex;
+            justify-content:flex-end;
+            --credit-avatar-size:28px;
+        }
+        .minds-credit .credit-pill{
+            background:rgba(255,255,255,0.95);
+            border:1px solid #dcdcdc;
+            border-radius:12px;
+            padding:.45rem .75rem;
+            display:flex;
+            align-items:center;
+            gap:.65rem;
+            box-shadow:0 4px 12px rgba(0,0,0,0.08);
+            pointer-events:auto;
+            max-width:320px;
+        }
+        .minds-credit .credit-pill img{
+            width:var(--credit-avatar-size)!important;
+            height:var(--credit-avatar-size)!important;
+            max-width:none!important;
+            max-height:none!important;
+            border-radius:10px;
+            border:1px solid #e5e5e5;
+            object-fit:cover;
+            flex-shrink:0;
+            display:block;
+        }
+        .minds-credit .credit-text{
+            display:block;
+            font-size:.82rem;
+            line-height:1.15;
+            text-align:left;
+        }
+        .minds-credit .credit-line{
+            display:block;
+            margin-bottom:.2rem;
+        }
+        .minds-credit .credit-line:last-child{margin-bottom:0;}
+        .minds-credit .credit-text a{
+            font-size:.79rem;
+            color:#1769aa;
+            text-decoration:none;
+        }
+        .minds-credit .credit-text a:hover{
+            text-decoration:underline;
         }
 
         """
@@ -505,41 +794,104 @@ class GradioUI:
         #     except Exception as e:
         #         return f"⚠️  Cannot display file: {e}"
 
-        def show_preview(selection):
-            """Return component updates so the right viewer shows the file."""
+
+        def preview_message(text: str):
             hidden = gr.update(visible=False)
+            download_reset = gr.update(value=None, visible=True, interactive=False)
+            button_disabled = gr.update(interactive=False)
+            return (
+                hidden,
+                hidden,
+                hidden,
+                gr.update(value=text, visible=True),
+                download_reset,
+                button_disabled,
+                button_disabled,
+                button_disabled,
+                "",
+            )
 
+        def _pick_valid_selection(selection):
+            """Return the most recently clicked existing path."""
             if not selection:
-                return hidden, hidden, hidden, gr.update(
-                    value="⬅️ Click a file to preview", visible=True
-                )
+                return None
+            if isinstance(selection, list):
+                for candidate in reversed(selection):
+                    if not candidate:
+                        continue
+                    candidate_path = os.path.join(folder, candidate)
+                    if os.path.exists(candidate_path):
+                        return candidate
+                # fallback to last entry even if missing so we can show an error
+                return selection[-1]
+            return selection
 
-            rel_path = selection[0] if isinstance(selection, list) else selection
+        def show_preview(selection):
+            """Return component updates so the right viewer shows the selected file."""
+            hidden = gr.update(visible=False)
+            copy_disabled = gr.update(interactive=False)
+
+            rel_path = _pick_valid_selection(selection)
+            if not rel_path:
+                return preview_message("⬅️ Click a file to preview")
+
             abs_path = os.path.join(folder, rel_path)
+            if not os.path.exists(abs_path):
+                return preview_message("⚠️ File not found. Refresh and try again.")
 
             if os.path.isdir(abs_path):
-                return hidden, hidden, hidden, gr.update(
-                    value="📁 Directory (no preview)", visible=True
-                )
+                return preview_message("📁 Directory (no preview)")
 
             ext = os.path.splitext(abs_path)[1].lower()
+            download_update = gr.update(value=abs_path, visible=True, interactive=True)
+            delete_enabled = gr.update(interactive=True)
+            fullscreen_enabled = gr.update(interactive=True)
 
             # ---------- IMAGES ----------
             if ext in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
-                return hidden, gr.update(value=abs_path, visible=True), hidden, hidden
+                return (
+                    hidden,
+                    gr.update(value=abs_path, visible=True),
+                    hidden,
+                    hidden,
+                    download_update,
+                    copy_disabled,
+                    delete_enabled,
+                    fullscreen_enabled,
+                    abs_path,
+                )
 
             # ---------- PDF -------------
             if ext == ".pdf":
-                return gr.update(value=abs_path, visible=True), hidden, hidden, hidden
+                return (
+                    gr.update(value=abs_path, visible=True),
+                    hidden,
+                    hidden,
+                    hidden,
+                    download_update,
+                    copy_disabled,
+                    delete_enabled,
+                    fullscreen_enabled,
+                    abs_path,
+                )
 
             # ---------- SPREADSHEETS ----
             if ext in {".csv", ".tsv", ".xlsx"}:
                 try:
                     df = (pd.read_csv if ext != ".xlsx" else pd.read_excel)(abs_path)
-                    return hidden, hidden, gr.update(value=df, visible=True), hidden
+                    return (
+                        hidden,
+                        hidden,
+                        gr.update(value=df, visible=True),
+                        hidden,
+                        download_update,
+                        copy_disabled,
+                        delete_enabled,
+                        fullscreen_enabled,
+                        abs_path,
+                    )
                 except Exception as e:
-                    msg = f"⚠️ Cannot read file: {e}"
-                    return hidden, hidden, hidden, gr.update(value=msg, visible=True)
+                    return preview_message(f"⚠️ Cannot read file: {e}")
 
             # ---------- TEXT / fallback -
             try:
@@ -547,7 +899,79 @@ class GradioUI:
                     txt = f.read(20_000)
             except Exception as e:
                 txt = f"⚠️ Cannot display file: {e}"
-            return hidden, hidden, hidden, gr.update(value=txt, visible=True)
+                copy_state = copy_disabled
+            else:
+                copy_state = gr.update(interactive=True)
+
+            return (
+                hidden,
+                hidden,
+                hidden,
+                gr.update(value=txt, visible=True),
+                download_update,
+                copy_state,
+                delete_enabled,
+                fullscreen_enabled,
+                abs_path,
+            )
+
+        def delete_selected_file(current_file: str | None):
+            if not current_file:
+                return preview_message("⚠️ No file selected to delete.")
+
+            abs_path = os.path.abspath(current_file)
+            try:
+                common = os.path.commonpath([folder, abs_path])
+            except ValueError:
+                return preview_message("⚠️ Invalid file path.")
+
+            if common != folder:
+                return preview_message("⚠️ Cannot delete files outside the workspace.")
+            if not os.path.exists(abs_path):
+                return preview_message("⚠️ File already removed.")
+            if os.path.isdir(abs_path):
+                return preview_message("⚠️ Deleting directories is not supported.")
+
+            try:
+                os.remove(abs_path)
+                message = f"🗑️ Deleted {os.path.relpath(abs_path, folder)}"
+            except Exception as e:
+                message = f"⚠️ Delete failed: {e}"
+
+            return preview_message(message)
+
+
+        def zip_workspace():
+            tmp_dir = tempfile.mkdtemp(prefix="hamlet_zip_")
+            zip_path = os.path.join(tmp_dir, "workspace.zip")
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for root, _dirs, files in os.walk(folder):
+                    for file in files:
+                        abs_file = os.path.join(root, file)
+                        rel_name = os.path.relpath(abs_file, folder)
+                        archive.write(abs_file, rel_name)
+            return zip_path
+
+
+        def reset_workspace(current_log: list[str]):
+            message = "The working directory has been reset."
+            try:
+                for entry in os.listdir(folder):
+                    abs_entry = os.path.join(folder, entry)
+                    if os.path.isdir(abs_entry):
+                        shutil.rmtree(abs_entry)
+                    else:
+                        os.remove(abs_entry)
+            except Exception as e:
+                message = f"Failed to reset the working directory: {e}"
+                new_log = current_log
+            else:
+                new_log = []
+
+            preview_outputs = preview_message(message)
+            status_update = gr.update(value=message, visible=True)
+            return (*preview_outputs, new_log, status_update)
+
 
 
         def force_refresh():
@@ -559,29 +983,38 @@ class GradioUI:
             return gr.update(ignore_glob=dummy_glob)
 
         # ---------- UI -------------------------------------------------------
-        with gr.Blocks(theme="ocean", fill_height=True, css=custom_css) as demo:
+        with gr.Blocks(theme="ocean", fill_height=True, css=custom_css, elem_id="hamlet-root") as demo:
             session_state    = gr.State({})
             stored_messages  = gr.State([])
             file_uploads_log = gr.State([])
+            selected_file    = gr.State("")
+            upload_status_box = None
 
             # ----- sidebar ---------------------------------------------------
             with gr.Sidebar():
                 gr.Markdown(f"# {self.name.title()}")
                 if self.description:
                     gr.Markdown(f"**Agent:** {self.description}")
-
-                text_input = gr.Textbox(lines=3, placeholder="Type your prompt…")
-                submit_btn = gr.Button("Submit", variant="primary")
-
-                # file‑upload widget
-                if self.file_upload_folder:
-                    upload_file   = gr.File(label="Upload a file")
-                    upload_status = gr.Textbox(visible=False, interactive=False)
+                if self._readme_markdown:
+                    gr.Markdown(self._readme_markdown)
 
             # ----- main area -------------------------------------------------
-            with gr.Row(scale=12):                 # full width minus sidebar
+            with gr.Row(scale=12, elem_classes="main-layout", elem_id="hamlet-main"):
+                gr.HTML(
+                    """
+                    <div class="tsinghua-banner">
+                        <div class="tsinghua-banner-logo">
+                            <img src="https://www.ie.tsinghua.edu.cn/images/logo.png" alt="Tsinghua University IE Department logo" />
+                        </div>
+                        <div class="tsinghua-banner-title">学科知识引擎</div>
+                    </div>
+                    """,
+                    visible=True,
+                    elem_classes="tsinghua-banner-wrapper",
+                )
+
                 # ---- (A) Chat column ---------------------------------------
-                with gr.Column(scale=7, min_width=500):
+                with gr.Column(scale=7, min_width=500, elem_classes="chat-pane"):
                     chatbot = gr.Chatbot(
                         label="Agent",
                         type="messages",
@@ -589,46 +1022,241 @@ class GradioUI:
                             None,
                             "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
                         ),
-                        height="100vh",     # ← responsive: 70 % of the browser window
                         resizeable=True,
                     )
+
+                    with gr.Row(elem_classes="chat-input-row", equal_height=True):
+                        text_input = gr.Textbox(
+                            lines=1,
+                            placeholder="Type your prompt…",
+                            show_label=False,
+                            scale=4,
+                        )
+                        submit_btn = gr.Button(
+                            "提交",
+                            variant="primary",
+                            scale=1,
+                        )
 
                 # ---- (B) Explorer + preview column -------------------------
                 with gr.Column(scale=5, min_width=350, elem_classes="vscode-pane"):
                     
-                    # 1️⃣ FILE‑EXPLORER
-                    gr.HTML("<div class='vscode-header'>Files</div>")
+                    # 1️⃣ FILE‑EXPLORER + toolbar
+                    with gr.Row(elem_classes="files-header-row"):
+                        gr.HTML("<div class='vscode-header files-header-title'>工作区</div>")
+                        with gr.Row(elem_classes="files-toolbar"):
+                            upload_button = gr.UploadButton(
+                                "📤",
+                                file_types=["file"],
+                                file_count="single",
+                                size="sm",
+                                elem_id="files_upload",
+                                variant="secondary",
+                            )
+                            zip_download_button = gr.DownloadButton(
+                                label="🗜",
+                                size="sm",
+                                variant="secondary",
+                                elem_id="files_zip",
+                            )
+                            reset_button = gr.Button(
+                                "♻",
+                                size="sm",
+                                variant="secondary",
+                                elem_id="files_reset",
+                            )
+
+                    upload_status_box = gr.Textbox(visible=False, interactive=False)
                     file_explorer = gr.FileExplorer(
-                        root_dir=folder, file_count="multiple", interactive=True, value=None,
-                        height="25vh",
+                        root_dir=folder, file_count="single", interactive=True, value=None,
+                        height="30vh",
                     )
 
-                    # 2️⃣ PREVIEW header + working full‑screen button
-                    gr.HTML(
-                        """<div class='vscode-header'>
-                            Preview <span class='fullscreen-btn' id='preview_fs'>🗖</span>
-                        </div>"""
-                    )
+                    with gr.Row(elem_classes="preview-header-row"):
+                        gr.HTML("<div class='vscode-header preview-header-title'>预览</div>")
+                        with gr.Row(elem_classes="preview-toolbar"):
+                            copy_button = gr.Button(
+                                "⧉",
+                                elem_id="preview_copy",
+                                interactive=False,
+                                size="sm",
+                                variant="secondary",
+                            )
+                            preview_download = gr.DownloadButton(
+                                label="⬇",
+                                visible=True,
+                                interactive=False,
+                                elem_id="preview_download",
+                                size="sm",
+                                variant="secondary",
+                            )
+                            fullscreen_button = gr.Button(
+                                "🗖",
+                                elem_id="preview_fs",
+                                interactive=False,
+                                size="sm",
+                                variant="secondary",
+                            )
+                            delete_button = gr.Button(
+                                "🗑",
+                                elem_id="preview_delete",
+                                interactive=False,
+                                size="sm",
+                                variant="secondary",
+                            )
 
                     # put ONE overlay somewhere in the page (fixed‑position → location irrelevant)
-                    # gr.HTML(LIGHTBOX_HTML, visible=True)
                     gr.HTML(LIGHTBOX_HTML, visible=True, elem_classes="overlay-wrapper")
 
                     # 3️⃣ PREVIEW widgets
-                    pdf_preview   = PDF(
-                        visible=False,
-                        interactive=False,
-                        # height=400,           # ← ADD THIS LINE
-                        elem_classes="preview-box"
+                    with gr.Group(elem_classes="preview-wrapper"):
+                        pdf_preview   = PDF(
+                            visible=False,
+                            interactive=False,
+                            elem_classes="preview-box"
+                        )
+                        img_preview   = gr.Image(interactive=False, visible=False, elem_classes="preview-box")
+                        table_preview = gr.Dataframe(interactive=False, visible=False, elem_classes="preview-box")
+                        text_preview  = gr.Code(
+                            interactive=True,
+                            lines=20,
+                            visible=True,
+                            elem_classes="preview-box",
+                            elem_id="preview-text",
+                        )
+
+                    gr.HTML(
+                        """
+                        <style>
+                            .minds-credit {
+                                display: flex;
+                                align-items: center;
+                                gap: 16px;
+                                justify-content: flex-end;   /* ← pushes items to the right */
+                                text-align: middle;           /* ← aligns text inside */
+                            }
+
+                            .credit-text .credit-line {
+                                display: block;
+                            }
+                        </style>
+
+                        <div class="minds-credit">
+                            <div class="credit-text">
+                                <span class="credit-line">
+                                    工业工程学科引擎底层智能体框架由 <strong><a href="https://github.com/MINDS-THU" target="_blank" rel="noopener noreferrer">MINDS-THU</a></strong> 设计、实现与维护
+                                </span>
+                                <span class="credit-line">
+                                    如需构建与部署您自己的智能体，请访问我们的项目
+                                    <a href="https://github.com/MINDS-THU/HAMLET" target="_blank" rel="noopener noreferrer">
+                                        HAMLET
+                                    </a>
+                                </span>
+                                <span class="credit-line">
+                                    如有Bug报告或交流需求，欢迎发邮件至
+                                    <a href="mailto:li.chuanhao@outlook.com">li.chuanhao@outlook.com</a>
+                                </span>
+                            </div>
+
+                            <img src="https://avatars.githubusercontent.com/u/224852121?s=400&u=9715939e7952f8ac9b2f5806bdc185c14c3b5376&v=4"
+                                alt="MINDS-THU logo"
+                                style="width: 55px; height: auto;" />
+                        </div>
+
+                        """,
+                        visible=True,
+                        padding=True,
                     )
-                    img_preview   = gr.Image(interactive=False, visible=False, elem_classes="preview-box")
-                    table_preview = gr.Dataframe(interactive=False, visible=False, elem_classes="preview-box")
-                    text_preview  = gr.Code(interactive=False, lines=20, visible=True, elem_classes="preview-box")
 
                     file_explorer.change(
                         show_preview,
                         [file_explorer],
-                        [pdf_preview, img_preview, table_preview, text_preview],
+                        [
+                            pdf_preview,
+                            img_preview,
+                            table_preview,
+                            text_preview,
+                            preview_download,
+                            copy_button,
+                            delete_button,
+                            fullscreen_button,
+                            selected_file,
+                        ],
+                    )
+
+                    delete_button.click(
+                        delete_selected_file,
+                        [selected_file],
+                        [
+                            pdf_preview,
+                            img_preview,
+                            table_preview,
+                            text_preview,
+                            preview_download,
+                            copy_button,
+                            delete_button,
+                            fullscreen_button,
+                            selected_file,
+                        ],
+                    ).then(
+                        force_refresh,
+                        None,
+                        [file_explorer],
+                    )
+
+                    upload_button.upload(
+                        self.upload_file,
+                        [upload_button, file_uploads_log],
+                        [upload_status_box, file_uploads_log],
+                    ).then(
+                        force_refresh,
+                        None,
+                        [file_explorer],
+                    )
+
+                    zip_download_button.click(
+                        zip_workspace,
+                        None,
+                        [zip_download_button],
+                    )
+
+                    reset_button.click(
+                        reset_workspace,
+                        [file_uploads_log],
+                        [
+                            pdf_preview,
+                            img_preview,
+                            table_preview,
+                            text_preview,
+                            preview_download,
+                            copy_button,
+                            delete_button,
+                            fullscreen_button,
+                            selected_file,
+                            file_uploads_log,
+                            upload_status_box,
+                        ],
+                    ).then(
+                        force_refresh,
+                        None,
+                        [file_explorer],
+                    )
+
+                    copy_button.click(
+                        None,
+                        [text_preview],
+                        None,
+                        js="""
+                        (text) => {
+                            if (!text || !navigator.clipboard) return;
+                            navigator.clipboard.writeText(text).then(() => {
+                                const btn = document.getElementById('preview_copy');
+                                if (!btn) return;
+                                btn.classList.add('copied');
+                                setTimeout(() => btn.classList.remove('copied'), 700);
+                            }).catch(err => console.warn('Clipboard copy failed', err));
+                        }
+                        """,
                     )
 
                     # ──────────────────────────────────────────────────────────────
@@ -636,20 +1264,58 @@ class GradioUI:
                     # ──────────────────────────────────────────────────────────────
                     demo.load(
                         None, None, None,
-                        js="""                // ← this is the block you already pasted
+                        js="""
                         () => {
-                        const fsBtn    = document.getElementById('preview_fs');
-                        const overlay  = document.getElementById('preview-overlay');
-                        const content  = document.getElementById('overlay‑content');
-                        const closeBtn = overlay.querySelector('.overlay‑close');
+                        if (window.__hamletPreviewToolbarBound) return;
+                        window.__hamletPreviewToolbarBound = true;
 
-                        if (!fsBtn || fsBtn.dataset.bound) return;
-                        fsBtn.dataset.bound = 1;
+                        const overlay = document.getElementById('preview-overlay');
+                        const content = document.getElementById('overlay‑content');
+                        const closeBtn = overlay?.querySelector('.overlay‑close');
 
-                        fsBtn.addEventListener('click', () => {
-                            const box = Array.from(document.querySelectorAll('.preview-box'))
-                                            .find(el => el.offsetParent !== null);
-                            if (!box) return;
+                        const tooltipMap = {
+                            preview_copy: '复制',
+                            preview_download: '下载',
+                            preview_fs: '最大化',
+                            preview_delete: '删除',
+                            files_upload: '上传文件',
+                            files_zip: '打包下载工作区',
+                            files_reset: '重置',
+                        };
+
+                        const findTarget = (node) => {
+                            if (!node) return null;
+                            const selector = 'button,label,[role="button"]';
+                            if (node.matches?.(selector)) return node;
+                            return node.querySelector?.(selector) || null;
+                        };
+
+                        const applyTooltips = () => {
+                            Object.entries(tooltipMap).forEach(([id, text]) => {
+                                const node = document.getElementById(id);
+                                const target = findTarget(node);
+                                if (!target) return;
+                                target.setAttribute('title', text);
+                                target.setAttribute('aria-label', text);
+                            });
+                        };
+                        applyTooltips();
+
+                        const previewToolbar = document.querySelector('.preview-toolbar');
+                        if (previewToolbar) {
+                            new MutationObserver(() => applyTooltips()).observe(previewToolbar, { childList: true, subtree: true });
+                        }
+                        const filesToolbar = document.querySelector('.files-toolbar');
+                        if (filesToolbar) {
+                            new MutationObserver(() => applyTooltips()).observe(filesToolbar, { childList: true, subtree: true });
+                        }
+
+                        const getVisibleBox = () =>
+                            Array.from(document.querySelectorAll('.preview-box'))
+                                .find(el => el.offsetParent !== null);
+                        const enterFullscreen = () => {
+                            const box = getVisibleBox();
+                            if (!box || !overlay || !content) return;
 
                             const placeholder = document.createElement('div');
                             placeholder.style.display = 'none';
@@ -659,56 +1325,47 @@ class GradioUI:
                             content.appendChild(box);
 
                             box.querySelectorAll('embed,iframe,object').forEach(el => {
-                            el.style.width  = '100%';
-                            el.style.height = '100%';
+                                el.style.width = '100%';
+                                el.style.height = '100%';
                             });
 
                             overlay.style.display = 'flex';
                             window.dispatchEvent(new Event('resize'));
-                            /* ---------- close logic ------------------------------------ */
-                            const close = () => {
-                            // put the live box back where it came from
-                            if (placeholder.parentNode)
-                                placeholder.parentNode.replaceChild(box, placeholder);
 
-                            overlay.style.display = 'none';
+                            const close = () => {
+                                if (placeholder.parentNode) {
+                                    placeholder.parentNode.replaceChild(box, placeholder);
+                                }
+                                overlay.style.display = 'none';
                             };
 
-                            /* ‑‑‑ make sure we don’t pile up multiple listeners ‑‑‑ */
-                            overlay.onclick  = null;
-                            closeBtn.onclick = null;
+                            overlay.onclick = null;
+                            if (closeBtn) closeBtn.onclick = null;
 
-                            /* grey background click */
                             overlay.addEventListener('click', (ev) => {
-                            if (ev.target === overlay) close();
-                            }, { once:true });
+                                if (ev.target === overlay) close();
+                            }, { once: true });
 
-                            /* little × click */
-                            closeBtn.addEventListener('click', (ev) => {
-                            ev.stopPropagation();       // don’t bubble to overlay
-                            close();
-                            }, { once:true });
-                            /* ----------------------------------------------------------- */
+                            if (closeBtn) {
+                                closeBtn.addEventListener('click', (ev) => {
+                                    ev.stopPropagation();
+                                    close();
+                                }, { once: true });
+                            }
+                        };
+
+                        document.addEventListener('click', (event) => {
+                            const fsButton = event.target.closest('#preview_fs button, #preview_fs');
+                            if (fsButton) {
+                                event.preventDefault();
+                                enterFullscreen();
+                                return;
+                            }
                         });
                         }
                         """
                     )
 
-
-
-
-
-            # now that file_explorer exists, wire **upload** → refresh
-            if self.file_upload_folder:
-                upload_file.change(
-                    self.upload_file,
-                    [upload_file, file_uploads_log],
-                    [upload_status, file_uploads_log],
-                ).then(
-                    force_refresh,          # immediately refresh explorer
-                    None,
-                    [file_explorer],
-                )
 
             # ----- chat helpers & events ------------------------------------
             def handle_prompt(prompt, uploads, history):

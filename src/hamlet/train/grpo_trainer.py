@@ -556,7 +556,7 @@ class GRPOTrainer(Trainer):
         }
 
         # vLLM client for weight syncing only; only import if used
-        from src.hamlet.train.inference.vllm_client import VLLMClient
+        from hamlet.train.inference.vllm_client import VLLMClient
 
         self.vllm_client = VLLMClient(
             host=host, port=port, connection_timeout=args.vllm_server_timeout

@@ -35,13 +35,13 @@ try:
 except Exception as e:
     print(f"[GRADIO] Failed to set custom temp dir: {e}")
 
-from src.hamlet.serve.agent_config_ui import AgentConfigManager, stream_to_gradio
-from src.hamlet.core.models import LiteLLMModel
-from src.hamlet.core.tools import Tool
-from src.hamlet.core.monitoring import LogLevel
-from src.hamlet.core.agents import CodeAgent
-from src.hamlet.tools import get_available_tools, create_tool_instance, discover_tools
-from src.hamlet.tools.text_web_browser.text_web_browser import SimpleTextBrowser
+from hamlet.serve.agent_config_ui import AgentConfigManager, stream_to_gradio
+from hamlet.core.models import LiteLLMModel
+from hamlet.core.tools import Tool
+from hamlet.core.monitoring import LogLevel
+from hamlet.core.agents import CodeAgent
+from hamlet.tools import get_available_tools, create_tool_instance, discover_tools
+from hamlet.tools.text_web_browser.text_web_browser import SimpleTextBrowser
 
 # Initialize the configuration manager for agents and tools
 config_manager = AgentConfigManager()
@@ -164,7 +164,7 @@ class ToolFactory:
         if key in ToolFactory._kb_indexers:
             return ToolFactory._kb_indexers[key]
         try:
-            from src.hamlet.tools.kb_repo_management.repo_indexer import RepoIndexer  # local import
+            from hamlet.tools.kb_repo_management.repo_indexer import RepoIndexer  # local import
             # Place vector store as sibling of knowledge_base (project_root/vector_store)
             index_dir = Path(kb_root).parent / "vector_store"
             index_dir.mkdir(exist_ok=True)

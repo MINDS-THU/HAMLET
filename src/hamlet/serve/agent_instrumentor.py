@@ -13,7 +13,9 @@ from openinference.instrumentation.smolagents._wrappers import (
     _ModelWrapper,
     _StepWrapper,
 )
-from smolagents import CodeAgent, ToolCallingAgent, MultiStepAgent, Tool, models
+from hamlet.core import models
+from hamlet.core.agents import CodeAgent, ToolCallingAgent, MultiStepAgent
+from hamlet.core.tools import Tool
 import smolagents
 
 # Constants
@@ -108,46 +110,6 @@ class CustomSmolagentsInstrumentor:
         self._original_step_methods = None
         self._original_model_call_methods = None
         self._original_tool_call_method = None
-
-    # def instrument(self, tracer_provider=None, config: Optional[TraceConfig] = None) -> None:
-    #     if tracer_provider is None:
-    #         tracer_provider = trace_api.get_tracer_provider()
-    #     if config is None:
-    #         config = TraceConfig()
-
-    #     self._tracer = OITracer(
-    #         tracer_provider.get_tracer(__name__, "custom"),
-    #         config=config,
-    #     )
-
-    #     # Wrap MultiStepAgent.run
-    #     run_wrapper = CustomRunWrapper(tracer=self._tracer)
-    #     self._original_run_method = getattr(MultiStepAgent, "run", None)
-    #     wrap_function_wrapper("smolagents", "MultiStepAgent.run", run_wrapper)
-
-    #     # Wrap step()
-    #     self._original_step_methods: Optional[dict[type, Optional[Callable[..., Any]]]] = {}
-    #     step_wrapper = _StepWrapper(tracer=self._tracer)
-    #     for step_cls in [CodeAgent, ToolCallingAgent]:
-    #         self._original_step_methods[step_cls] = getattr(step_cls, "step", None)
-    #         wrap_function_wrapper("smolagents", f"{step_cls.__name__}.step", step_wrapper)
-
-    #     # Wrap model.__call__()
-    #     self._original_model_call_methods: Optional[dict[type, Callable[..., Any]]] = {}
-    #     exported_model_subclasses = [
-    #         attr
-    #         for _, attr in vars(smolagents).items()
-    #         if isinstance(attr, type) and issubclass(attr, models.Model)
-    #     ]
-    #     for model_subclass in exported_model_subclasses:
-    #         model_wrapper = _ModelWrapper(tracer=self._tracer)
-    #         self._original_model_call_methods[model_subclass] = getattr(model_subclass, "__call__")
-    #         wrap_function_wrapper("smolagents", model_subclass.__name__ + ".__call__", model_wrapper)
-
-    #     # Wrap Tool.__call__()
-    #     tool_wrapper = CustomToolCallWrapper(tracer=self._tracer)
-    #     self._original_tool_call_method = getattr(Tool, "__call__", None)
-    #     wrap_function_wrapper("smolagents", "Tool.__call__", tool_wrapper)
 
     def instrument(self, tracer_provider=None, config: Optional[TraceConfig] = None) -> None:
         if CustomSmolagentsInstrumentor._already_instrumented:

@@ -6,7 +6,7 @@ and appending content to existing files. All updates are automatically indexed
 for semantic search.
 """
 
-from src.hamlet.core.tools import Tool
+from hamlet.core.tools import Tool
 import shutil
 from pathlib import Path
 from .repo_indexer import RepoIndexer

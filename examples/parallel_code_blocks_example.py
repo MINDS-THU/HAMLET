@@ -5,9 +5,8 @@ import os
 
 from dotenv import load_dotenv
 
-from src.hamlet.core.agents import CodeAgent
-from src.hamlet.core.models import LiteLLMModel
-from src.hamlet.core.monitoring import LogLevel
+from hamlet.core import CodeAgent, LiteLLMModel
+from hamlet.core.monitoring import LogLevel
 
 
 def build_agent() -> CodeAgent:

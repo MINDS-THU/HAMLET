@@ -6,7 +6,7 @@ from openai.types.chat.chat_completion import Choice
 from openai.types.completion import Completion
 from openai.types.completion_choice import CompletionChoice
 
-from src.hamlet.train.utils.types import ChatMessage, Messages, MessageType, ModelResponse
+from hamlet.train.utils.types import ChatMessage, Messages, MessageType, ModelResponse
 
 
 def message_to_printable(message: ChatMessage) -> ChatMessage:

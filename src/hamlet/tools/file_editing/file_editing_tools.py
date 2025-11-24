@@ -1,4 +1,4 @@
-from src.hamlet.core.tools import Tool
+from hamlet.core.tools import Tool
 import os
 from typing import Any
 import importlib.util

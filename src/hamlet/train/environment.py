@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Literal
 from datasets import Dataset
 from openai import AsyncOpenAI, BadRequestError, OpenAI
 
-from src.hamlet.train.parser import Parser
-from src.hamlet.train.rubric import Rubric
-from src.hamlet.train.utils.types import (
+from hamlet.train.parser import Parser
+from hamlet.train.rubric import Rubric
+from hamlet.train.utils.types import (
     ChatCompletion,
     ChatCompletionToolParam,
     ChatMessage,
@@ -27,7 +27,7 @@ from src.hamlet.train.utils.types import (
     SamplingArgs,
     State,
 )
-from src.hamlet.train.utils.message_utils import (
+from hamlet.train.utils.message_utils import (
     cleanup_messages,
     get_overlong_prompt_dummy_response,
     sanitize_tool_calls,
@@ -58,7 +58,7 @@ class Environment(ABC):
         max_workers: int = 512,
         **kwargs,
     ):
-        self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
+        self.logger = logging.getLogger(f"hamlet.train.environment.{self.__class__.__name__}")
         self.message_type: Literal["chat", "completion"] = message_type
         self.oai_tools: list[ChatCompletionToolParam] | None = oai_tools
         self.system_prompt = system_prompt
