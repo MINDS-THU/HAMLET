@@ -36,5 +36,6 @@ Optional extras:
 
 Jump into the `examples/` directory to see how to use HAMLET in action:
 - `examples/gradio_gui_example.py`: launches a Gradio UI for interactive tool usage.
+![GUI_Example](./resource/GUI_example.png)
 - `examples/parallel_code_blocks_example.py`: shows multi-tool calls dispatched in parallel.
 - `examples/structured_schema_example.py`: demonstrates structured input/output schemas.
