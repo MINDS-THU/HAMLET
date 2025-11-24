@@ -52,24 +52,45 @@ uv run python examples\parallel_code_blocks_example.py
 ```
 Shows how HAMLET dispatches multiple LLM-generated code blocks concurrently and uses an optional `Early Stop Strategy: code` snippet to stop remaining executions once a shared goal is met.
 
-Example run (summarized):
+Example run:
 ```
 Thought:
-- Strategy 1: closed-form sum of squares n(n+1)(2n+1)/6
-- Strategy 2: direct iteration sum(i * i for i in range(1, 76))
-- Early Stop Strategy: code ensures 0 <= total <= 500000
+I'll compute the sum of squares 1^2 + 2^2 + ... + 75^2 using two independent strategies:
+1) Closed-form formula: n(n+1)(2n+1)/6.
+2) Direct summation (Python sum over a generator).
+I'll print the computed totals (using the same variable name total in both blocks). I'll use Early Stop Strategy: code to check that the computed total lies within the 0–500000 bound (0 <= total <= 500000). 
 
-Code#1 and Code#2 execute in parallel, both printing their totals.
-Early stop code runs afterward and cancels the remaining execution once the bound check passes.
+Code#1:
+<code>
+# Code#1: closed-form formula for sum of squares
+n = 75
+total = n * (n + 1) * (2 * n + 1) // 6
+print("Method: formula, total:", total)
+</code>
+
+Code#2:
+<code>
+# Code#2: direct iterative summation
+total = sum(i * i for i in range(1, 76))
+print("Method: iterative sum, total:", total)
+</code>
+
+Early Stop Strategy: code
+
+Early Stop Code:
+<code>
+# Early Stop Code: check whether 'total' is within the requested 0-500000 bound
+early_stop_result = (0 <= total <= 500000)
+</code>
 ```
 
 Log excerpt:
 ```
-─ Concurrently executing parsed Code#1 (2 in total)
+Early stop strategy detected: 'code'. Will check each code execution result accordingly.
+Execution logs for Code#1 (2 in total):
 Method: formula, total: 143450
-─ Concurrently executing parsed Code#2 (2 in total)
-Method: iterative sum, total: 143450
-Execution result of Code#1 passed, other code executions will be cancelled.
+Executing parsed early stop code for Code#1 (2 in total)...
+Evaluation for the execution result of Code#1 passed (2 in total), other code executions will be cancelled.
 ```
 
 ### 3. Structured schema I/O
