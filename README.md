@@ -1,4 +1,4 @@
-HAMLET is a lightweight, all-in-one framework for building and iterating on LLM agents. It lets you define agents, launch a Gradio GUI, instrument runs with Langfuse, and fine-tune models using the built-in GRPO trainer. The framework is modified primarily on two open-source projects: [smolagents](https://github.com/huggingface/smolagents) for the core agent structure (`src/hamlet/core`) and [verifiers](https://github.com/PrimeIntellect-ai/verifiers) for the training stack (`src/hamlet/train`).
+HAMLET (Hierarchical Agents for Multi-level Learning, Execution & Tasking) is a lightweight, all-in-one framework for building and iterating on LLM agents. It lets you define agents, launch a Gradio GUI, instrument runs with Langfuse, and fine-tune models via SFT and RLVR. The framework is modified primarily on two open-source projects: [smolagents](https://github.com/huggingface/smolagents) for the core agent structure (`src/hamlet/core`) and [verifiers](https://github.com/PrimeIntellect-ai/verifiers) for the training stack (`src/hamlet/train`).
 
 ## Installation
 
