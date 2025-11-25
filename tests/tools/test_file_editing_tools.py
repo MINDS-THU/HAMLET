@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from src.hamlet.tools.file_editing import file_editing_tools
-from src.hamlet.tools.file_editing.file_editing_tools import (
+from hamlet.tools.file_editing import file_editing_tools
+from hamlet.tools.file_editing.file_editing_tools import (
     CreateFileWithContent,
     DeleteFileOrFolder,
     ListDir,

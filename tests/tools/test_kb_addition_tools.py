@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.hamlet.tools.kb_repo_management.kb_repo_addition_tools import (
+from hamlet.tools.kb_repo_management.kb_repo_addition_tools import (
     AppendToKnowledgeBaseFile,
     CopyToKnowledgeBase,
     WriteToKnowledgeBase,

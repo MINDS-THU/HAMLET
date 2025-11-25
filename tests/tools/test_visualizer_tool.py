@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.hamlet.tools.visual_qa.visual_qa import Visualizer
+from hamlet.tools.visual_qa.visual_qa import Visualizer
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def test_visualizer_returns_model_answer(monkeypatch: pytest.MonkeyPatch, image_
         return SimpleNamespace(json=lambda: {"choices": [{"message": {"content": "answer"}}]})
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("src.hamlet.tools.visual_qa.visual_qa.requests.post", fake_post)
+    monkeypatch.setattr("hamlet.tools.visual_qa.visual_qa.requests.post", fake_post)
 
     tool = Visualizer(str(working_dir))
     result = tool(image_path=image_file.name, question="What is shown?")
@@ -32,7 +32,7 @@ def test_visualizer_returns_model_answer(monkeypatch: pytest.MonkeyPatch, image_
 def test_visualizer_adds_caption_when_question_missing(monkeypatch: pytest.MonkeyPatch, image_file: Path, working_dir: Path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "src.hamlet.tools.visual_qa.visual_qa.requests.post",
+        "hamlet.tools.visual_qa.visual_qa.requests.post",
         lambda *args, **kwargs: SimpleNamespace(json=lambda: {"choices": [{"message": {"content": "desc"}}]}),
     )
 

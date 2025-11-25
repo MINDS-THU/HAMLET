@@ -1186,7 +1186,7 @@ class MultiStepAgent(ABC):
         """
         # Load model
         model_info = agent_dict["model"]
-        model_class = getattr(importlib.import_module("src.hamlet.core.models"), model_info["class"])
+        model_class = getattr(importlib.import_module("hamlet.core.models"), model_info["class"])
         model = model_class.from_dict(model_info["data"])
         # Load tools
         tools = []
@@ -1195,7 +1195,7 @@ class MultiStepAgent(ABC):
         # Load managed agents
         managed_agents = []
         for managed_agent_dict in agent_dict["managed_agents"]:
-            agent_class = getattr(importlib.import_module("src.hamlet.core.agents"), managed_agent_dict["class"])
+            agent_class = getattr(importlib.import_module("hamlet.core.agents"), managed_agent_dict["class"])
             managed_agent = agent_class.from_dict(managed_agent_dict, **kwargs)
             managed_agents.append(managed_agent)
         # Extract base agent parameters
@@ -1286,7 +1286,7 @@ class MultiStepAgent(ABC):
         # Load managed agents from their respective folders, recursively
         managed_agents = []
         for managed_agent_name, managed_agent_class_name in agent_dict["managed_agents"].items():
-            agent_cls = getattr(importlib.import_module("src.hamlet.core.agents"), managed_agent_class_name)
+            agent_cls = getattr(importlib.import_module("hamlet.core.agents"), managed_agent_class_name)
             managed_agents.append(agent_cls.from_folder(folder / "managed_agents" / managed_agent_name))
         agent_dict["managed_agents"] = {}
 
@@ -1399,11 +1399,11 @@ class CodeAgent(MultiStepAgent):
         self._use_structured_outputs_internally = use_structured_outputs_internally
         if self._use_structured_outputs_internally:
             prompt_templates = prompt_templates or yaml.safe_load(
-                importlib.resources.files("src.hamlet.core.prompts").joinpath("structured_code_agent.yaml").read_text()
+                importlib.resources.files("hamlet.core.prompts").joinpath("structured_code_agent.yaml").read_text()
             )
         else:
             prompt_templates = prompt_templates or yaml.safe_load(
-                importlib.resources.files("src.hamlet.core.prompts").joinpath("code_agent.yaml").read_text()
+                importlib.resources.files("hamlet.core.prompts").joinpath("code_agent.yaml").read_text()
             )
 
         if isinstance(code_block_tags, str) and not code_block_tags == "markdown":

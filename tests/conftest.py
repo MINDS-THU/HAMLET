@@ -29,11 +29,11 @@ def _install_markitdown_stub() -> None:
 
 
 def _install_repo_indexer_stub() -> None:
-    module_name = "src.hamlet.tools.kb_repo_management.repo_indexer"
+    module_name = "hamlet.tools.kb_repo_management.repo_indexer"
     if module_name in sys.modules:
         return
 
-    pkg = importlib.import_module("src.hamlet.tools.kb_repo_management")
+    pkg = importlib.import_module("hamlet.tools.kb_repo_management")
     stub = types.ModuleType(module_name)
 
     class RepoIndexer:  # pragma: no cover - stub only enables imports

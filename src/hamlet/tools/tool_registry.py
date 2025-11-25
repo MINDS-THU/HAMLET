@@ -50,7 +50,7 @@ class ToolRegistry:
                             continue
                             
                         # Import the module
-                        module_name = f"src.hamlet.tools.{tool_dir_name}.{py_file.stem}"
+                        module_name = f"hamlet.tools.{tool_dir_name}.{py_file.stem}"
                         try:
                             module = importlib.import_module(module_name)
                             

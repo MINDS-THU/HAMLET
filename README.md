@@ -2,7 +2,21 @@ HAMLET is a lightweight, all-in-one framework for building and iterating on LLM 
 
 ## Installation
 
-Follow the steps below to set up HAMLET in a fresh environment. The project uses [uv](https://github.com/astral-sh/uv) to manage Python dependencies because it keeps lock files fast and reproducible. You can still use `pip`, but uv is the recommended path.
+Install the published package when you just need the library, or clone the repo if you plan to modify HAMLET.
+
+### Option A: Install the package
+```powershell
+# inside your project
+uv add minds-hamlet
+
+# or with pip
+pip install minds-hamlet
+```
+This exposes the `hamlet` Python package for imports.
+
+### Option B: Work from source
+
+Follow the steps below to set up a local development environment. The project uses [uv](https://github.com/astral-sh/uv) to manage Python dependencies because it keeps lock files fast and reproducible. You can still use `pip`, but uv is the recommended path.
 
 ### 1. Prerequisites
 - Python 3.10 or newer (3.11+ works as well)

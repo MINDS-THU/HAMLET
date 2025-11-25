@@ -10,3 +10,4 @@ wheels/
 .venv
 **/.env
 **/.pytest_cache/
+**/uv_template_test

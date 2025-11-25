@@ -1,12 +1,25 @@
 [project]
-name = "hamlet"
-version = "0.1.0"
-description = "Add your description here"
+name = "minds-hamlet"
+version = "0.1.3"
+description = "Lightweight all-in-one framework for building, instrumenting, and fine-tuning LLM code agents."
 readme = "README.md"
 authors = [
     { name = "cyrilli", email = "948875507@qq.com" }
 ]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+keywords = ["llm", "agents", "automation", "gradio", "langfuse", "training"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "huggingface-hub>=0.31.2",
     "requests>=2.32.3",
@@ -33,9 +46,25 @@ dependencies = [
 [project.scripts]
 hamlet = "hamlet:main"
 
+[project.urls]
+Homepage = "https://github.com/MINDS-THU/HAMLET"
+Repository = "https://github.com/MINDS-THU/HAMLET"
+Issues = "https://github.com/MINDS-THU/HAMLET/issues"
+Documentation = "https://github.com/MINDS-THU/HAMLET#readme"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.package-data]
+"hamlet.core.prompts" = ["*.yaml"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hamlet", "hamlet.*", "minds_hamlet"]
+
 [build-system]
-requires = ["uv_build>=0.8.22,<0.9.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 tools = [

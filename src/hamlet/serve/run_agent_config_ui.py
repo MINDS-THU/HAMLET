@@ -1271,8 +1271,8 @@ def app():
                     for tname, cls in cls_map.items():
                         module = getattr(cls, '__module__', '')
                         parts = module.split('.')
-                        # group = parts[-1] if len(parts) > 2 and parts[0] == 'src.hamlet.tools' else '其他'
-                        group = parts[-1] if len(parts) > 2 and parts[0] == 'src' else '其他'
+                        # group = parts[-1] if len(parts) > 2 and parts[0] starts with the hamlet namespace else '其他'
+                        group = parts[-1] if len(parts) > 2 and parts[0] in {"hamlet", "minds_hamlet"} else '其他'
                         desc = getattr(cls, 'description', '') or ''
                         grouped.setdefault(group, []).append((tname, desc))
                     for g in grouped:
