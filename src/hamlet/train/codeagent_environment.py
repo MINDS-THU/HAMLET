@@ -87,6 +87,10 @@ class CodeAgentRubric(Rubric):
             0.5,
             # 1.0,
         ]
+        # add successful output schema reward func if output schema is not None
+        if self.agent is not None and self.agent.output_schema is not None:
+            self.reward_funcs.append(self.successful_output_schema_reward_func)
+            self.reward_weights.append(0.5)
 
     def successful_parsing_reward_func(
         self, completion: List[Dict[str, str]], **kwargs
@@ -155,6 +159,44 @@ class CodeAgentRubric(Rubric):
             return 0.0
         return successful_executions / total_attempts
 
+    def successful_output_schema_reward_func(self, completion: List[Dict[str, str]], state: State, **kwargs) -> float:
+        """
+        Reward function that validates the final answer against the agent's output_schema.
+        
+        Returns:
+            - 1.0 if the final answer matches the output_schema
+            - 0.0 if no final answer found, or validation fails
+        """
+        assert self.agent is not None
+        
+        # Get full_steps from state (stored during rollout)
+        full_steps = state.get("full_steps", None)
+        if full_steps is None:
+            return 0.0
+        
+        # Find the step with is_final_answer=True
+        final_answer_step = None
+        if isinstance(full_steps, list):
+            for step in full_steps:
+                if isinstance(step, dict) and step.get("is_final_answer", False):
+                    final_answer_step = step
+                    break
+        
+        if final_answer_step is None:
+            return 0.0
+        
+        # Extract action_output (the final answer value)
+        action_output = final_answer_step.get("action_output", None)
+        if action_output is None:
+            return 0.0
+        
+        # Validate against output_schema
+        try:
+            validate_passed, _ = self.agent.validate_output(action_output)
+            return 1.0 if validate_passed else 0.0
+        except Exception:
+            return 0.0
+    
     # def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
     #     """Reward function that checks if the final answer matches the expected answer."""
     #     # get the last assistant message, note that complete[-1] might be user message

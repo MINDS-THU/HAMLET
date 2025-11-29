@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from verifiers.types import Messages
+from hamlet.train.utils.types import Messages
 from collections.abc import Mapping
 
 
