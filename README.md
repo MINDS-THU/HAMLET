@@ -20,10 +20,13 @@ Follow the steps below to set up a local development environment. The project us
 
 ### 1. Prerequisites
 - Python 3.10 or newer (3.11+ works as well)
-- uv (install with the command below or follow the instructions in the uv repository)
-
+- uv (install with the command below or follow the instructions in the uv repository). On macOS and Linux, run
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+or on Windows run
 ```powershell
-pip install uv
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 ### 2. Clone the repository
