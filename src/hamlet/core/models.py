@@ -359,7 +359,7 @@ def supports_stop_parameter(model_id: str) -> bool:
     """
     Check if the model supports the `stop` parameter.
 
-    Not supported with reasoning models openai/o3, openai/o4-mini, and the openai/gpt-5 series (and their versioned variants).
+    Not supported with reasoning models openai/o1, openai/o3, openai/o4-mini, and the openai/gpt-5 series (and their versioned variants).
 
     Args:
         model_id (`str`): Model identifier (e.g. "openai/o3", "o4-mini-2025-04-16")
@@ -368,8 +368,8 @@ def supports_stop_parameter(model_id: str) -> bool:
         bool: True if the model supports the stop parameter, False otherwise
     """
     model_name = model_id.split("/")[-1]
-    # o3, o4-mini, grok-3-mini, grok-4, grok-code-fast and the gpt-5 series (including versioned variants, o3-2025-04-16) don't support stop parameter
-    openai_model_pattern = r"(o3[-\d]*|o4-mini[-\d]*|gpt-5(-mini|-nano)?[-\d]*)"
+    # o1, o1-mini, o3, o3-mini, o4, o4-mini, o4-nano, grok-3-mini, grok-4, grok-code-fast and the gpt-5 series (including versioned variants, e.g. gpt-5.4-mini) don't support stop parameter
+    openai_model_pattern = r"(o1(?:-(?:preview|mini))?[-\d]*|o3(?:-(?:mini|nano))?[-\d]*|o4(?:-(?:mini|nano))?[-\d]*|gpt-5(?:\.[\d]+)?(?:-(?:mini|nano))?)"
     grok_model_pattern = r"([a-zA-Z]+\.)?(grok-3-mini|grok-4|grok-code-fast)(-[A-Za-z0-9]*)?"
     pattern = rf"^({openai_model_pattern}|{grok_model_pattern})$"
 
